@@ -8,6 +8,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { DEPTH_STOPS, depthColor, SplatCloud } from '../splatcloud.js';
+import { coveredByScannedDoor, doorSwing, swingArc } from './doors.js';
 
 export { depthColor };
 
@@ -246,13 +247,31 @@ export class AdminScene {
     this.framed = false;
     this.focus = null;
 
+    this.highlighted = null;
+    this.panel = false;
+    this.sizer = new ResizeObserver(() => this.resize());
+    this.sizer.observe(container);
     this.resize();
     addEventListener('resize', () => this.resize());
+  }
+
+  // Moves the one renderer (and its labels and controls) into another
+  // container: the full-screen stage, or the operator's floor-plan panel.
+  attach(container, { panel = false } = {}) {
+    if (container === this.container) return;
+    this.sizer.unobserve(this.container);
+    this.container = container;
+    this.panel = panel;
+    container.append(this.renderer.domElement, this.labels.domElement);
+    this.sizer.observe(container);
+    this.resize();
+    this.frameAll();
   }
 
   resize() {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
+    if (!w || !h) return; // hidden: keep the last size
     this.renderer.setSize(w, h);
     this.labels.setSize(w, h);
     this.composer.setSize(w, h);
@@ -261,7 +280,9 @@ export class AdminScene {
     // Centre the scene in the space the panels leave free: above the bottom
     // sheet on phones, left of the side column on wider screens.
     this.narrow = w < 760;
-    if (this.narrow) this.camera.setViewOffset(w, h, 0, h * 0.17, w, h);
+    // In the operator panel nothing covers the view: centre it plainly.
+    if (this.panel) this.camera.clearViewOffset();
+    else if (this.narrow) this.camera.setViewOffset(w, h, 0, h * 0.17, w, h);
     else this.camera.setViewOffset(w, h, 160, 0, w, h);
     this.camera.updateProjectionMatrix();
     if (this.framed) this.frameAll();
@@ -420,6 +441,27 @@ export class AdminScene {
       }
     }
 
+    // Doorways: a red frame for a closed door, a faint swing arc for an open one.
+    for (const d of map.doorways ?? []) {
+      if (!Array.isArray(d?.s) || d.s.length !== 4) continue;
+      if (d.state === 'closed') {
+        if (coveredByScannedDoor(d, rooms)) continue;
+        const [a1, b1, a2, b2] = d.s;
+        const top = 2.05;
+        const obj = lineSegments([a1, 0, b1, a1, top, b1, a1, top, b1, a2, top, b2, a2, top, b2, a2, 0, b2], null, 0.95);
+        obj.material.color.set(ORIGIN_RED);
+        this.mapGroup.add(obj);
+        continue;
+      }
+      const sw = doorSwing(d, rooms);
+      const arc = swingArc(sw);
+      const pts = [sw.hinge[0], 0.03, sw.hinge[1], sw.leaf[0], 0.03, sw.leaf[1]];
+      for (let i = 1; i < arc.length; i++) pts.push(arc[i - 1][0], 0.03, arc[i - 1][1], arc[i][0], 0.03, arc[i][1]);
+      const obj = lineSegments(pts, null, 0.55);
+      obj.material.color.set(ORIGIN_RED);
+      this.mapGroup.add(obj);
+    }
+
     if (map.plan?.placement) this.addPlan(map.plan, grow);
 
     if (map.origin) {
@@ -533,6 +575,7 @@ export class AdminScene {
         this.deviceGroup.add(m.group);
       }
       m.el.textContent = d.name.toUpperCase();
+      m.el.classList.toggle('selected', d.id === this.highlighted);
       m.target.set(d.pose.p[0], 0, d.pose.p[2]);
       m.yaw = yawOf(d.pose.q);
       const active = (d.online ?? d.live) && (d.kind !== 'lidar' || d.aligned);
@@ -591,6 +634,12 @@ export class AdminScene {
     m.photoTex.offset.set((1 - m.photoTex.repeat.x) / 2, (1 - m.photoTex.repeat.y) / 2);
     m.photoTex.needsUpdate = true;
     m.photo.visible = true;
+  }
+
+  // The device selected in the operator view: red beacon and label.
+  highlight(id) {
+    this.highlighted = id;
+    for (const [mid, m] of this.devices) m.el.classList.toggle('selected', mid === id);
   }
 
   focusOn(id) {
@@ -664,6 +713,12 @@ export class AdminScene {
       m.photo.material.opacity = 0.95 * m.dim;
       m.beam.scale.y = m.tile.position.y;
       m.cone.rotation.y = m.yaw;
+      const sel = m.el.classList.contains('selected');
+      m.spot.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
+      m.cone.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
+      m.beam.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
+      m.tile.scale.setScalar(sel ? 1.35 : 1);
+      m.photo.scale.setScalar(sel ? 1.35 : 1);
       m.label.position.y = tileY + 0.45;
       for (const o of [m.tile, m.beam, m.spot, m.cone]) {
         o.material.opacity = (o === m.cone ? 0.22 : o === m.spot ? 0.85 : 0.95) * m.dim;

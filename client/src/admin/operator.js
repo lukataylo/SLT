@@ -2,6 +2,8 @@
 // device and where it is looking, beside a wall of every device's camera.
 // Pure 2D (canvas + DOM), so it stays fast while the 3D scene is paused.
 
+import { coveredByScannedDoor, doorSwing } from './doors.js';
+
 const RED = '#d71921';
 const LIME = '#c8ff3a';
 const STALE_MS = 5000;
@@ -68,16 +70,37 @@ export class OperatorView {
         </div>
       </div>
       <section class="op-plan">
-        <h2>FLOOR PLAN</h2>
+        <div class="op-planhead">
+          <h2>FLOOR PLAN</h2>
+          <div class="op-seg" role="group" aria-label="Floor plan view">
+            <button data-plan="2d" aria-pressed="true">2D PLAN</button>
+            <button data-plan="3d" aria-pressed="false">3D SPLAT</button>
+          </div>
+          <div class="op-seg op-pmodes" role="group" aria-label="Splat colours">
+            <button data-pmode="colour" aria-pressed="true">TRUE COLOUR</button>
+            <button data-pmode="depth" aria-pressed="false">DEPTH</button>
+          </div>
+        </div>
         <div class="op-canvas"><canvas aria-label="Top-down floor plan with every device and its view direction" role="img"></canvas>
           <p class="op-empty" hidden>NO MAP YET · SCAN A ROOM OR CREATE A GROUP</p></div>
+        <div class="op-splat" aria-label="3D Gaussian splat of the scanned rooms, collected by the phones" role="img"></div>
+        <div class="op-legend">
+          <span><i class="lg wall"></i>WALL</span>
+          <span><svg class="lg" viewBox="0 0 18 14" aria-hidden="true"><path d="M2 13V2" /><path d="M2 2A11 11 0 0 1 13 13" class="arc" /></svg>OPEN DOOR</span>
+          <span><i class="lg closed"></i>CLOSED DOOR</span>
+          <span><i class="lg window"></i>WINDOW</span>
+          <span><i class="lg origin"></i>ORIGIN</span>
+        </div>
       </section>
       <section class="op-wall">
         <h2><span class="dot on"></span>LIVE CAMERA FEEDS</h2>
         <div class="op-tiles"></div>
         <p class="op-empty op-nodevices">NO DEVICES CONNECTED</p>
       </section>`;
-    this.canvas = root.querySelector('canvas');
+    this.canvas = root.querySelector('.op-canvas canvas');
+    this.splatHost = root.querySelector('.op-splat');
+    this.planMode = '2d';
+    this.onSelect = null;
     this.ctx = this.canvas.getContext('2d');
     this.tilesEl = root.querySelector('.op-tiles');
     this.counts = Object.fromEntries([...root.querySelectorAll('[data-c]')].map((el) => [el.dataset.c, el]));
@@ -103,8 +126,21 @@ export class OperatorView {
     new ResizeObserver(() => this.relayout()).observe(this.tilesEl);
   }
 
+  // 2D PLAN (canvas) or 3D SPLAT (the admin scene, hosted in .op-splat by main.js).
+  setPlanMode(mode) {
+    this.planMode = mode === '3d' ? '3d' : '2d';
+    this.root.dataset.planview = this.planMode;
+    for (const b of this.root.querySelectorAll('button[data-plan]')) b.setAttribute('aria-pressed', String(b.dataset.plan === this.planMode));
+    this.dirty = true;
+  }
+
+  setPanelColour(mode) {
+    for (const b of this.root.querySelectorAll('[data-pmode]')) b.setAttribute('aria-pressed', String(b.dataset.pmode === mode));
+  }
+
   select(id) {
     this.selected = id && id !== this.selected ? id : null;
+    this.onSelect?.(this.selected);
     for (const [tid, t] of this.tiles) t.el.classList.toggle('selected', tid === this.selected);
     if (this.selected) this.tiles.get(this.selected)?.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     this.dirty = true;
@@ -371,6 +407,38 @@ export class OperatorView {
         ctx.setLineDash([]);
       }
     }
+    // Doorways: door-sized gaps in a wall line. Open = leaf at 90° from the
+    // hinge plus a quarter-circle swing; closed = a red bar across the gap
+    // (unless a scanned door already marks it).
+    for (const d of this.map?.doorways ?? []) {
+      if (!Array.isArray(d?.s) || d.s.length !== 4) continue;
+      if (d.state === 'closed') {
+        if (coveredByScannedDoor(d, rooms)) continue;
+        ctx.strokeStyle = RED;
+        ctx.lineWidth = Math.max(3, 0.16 * k);
+        ctx.lineCap = 'butt';
+        ctx.beginPath();
+        ctx.moveTo(...this.toScreen(d.s[0], d.s[1]));
+        ctx.lineTo(...this.toScreen(d.s[2], d.s[3]));
+        ctx.stroke();
+        ctx.lineCap = 'round';
+        continue;
+      }
+      const sw = doorSwing(d, rooms);
+      const [hx, hy] = this.toScreen(...sw.hinge);
+      ctx.strokeStyle = RED;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy);
+      ctx.lineTo(...this.toScreen(...sw.leaf));
+      ctx.stroke();
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(hx, hy, sw.radius * k, sw.from, sw.from + sw.sweep, sw.sweep < 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // Room names in each room's top-left corner, clear of the devices in the
     // middle. A placed floor plan already carries its own names.
     if (!this.planImg) {
@@ -449,15 +517,16 @@ export class OperatorView {
   }
 
   render(now) {
+    const plan2d = this.planMode === '2d';
     // Floor plan: redraw when data changed (devices move at ~5 Hz).
-    if (this.dirty) {
+    if (this.dirty && plan2d) {
       this.dirty = false;
       this.drawPlan();
     }
     if (now - this.lastLabels > 250) {
       this.lastLabels = now;
       this.updateLabels(now);
-      this.drawPlan(); // stale/streaming markers age with time, not messages
+      if (plan2d) this.drawPlan(); // stale/streaming markers age with time, not messages
     }
   }
 

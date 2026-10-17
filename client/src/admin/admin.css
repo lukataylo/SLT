@@ -187,3 +187,42 @@ body[data-view='operator'] #top { background: #000; padding-bottom: 14px; border
   .op-counts b { font-size: 24px; }
   .op-tiles { grid-template-columns: minmax(0, 1fr) !important; grid-auto-rows: 230px; }
 }
+
+/* --- Floor-plan panel: 2D PLAN / 3D SPLAT, legend, doors -------------------- */
+.op-planhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.op-planhead h2 { margin: 0 auto 0 2px; }
+.op-seg { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: #0a0a0a; }
+.op-seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 11px; border-radius: 999px;
+  font: 700 9px var(--mono); letter-spacing: 0.12em; }
+.op-seg button[aria-pressed='true'] { background: #f5f5f5; color: #000; }
+.op-seg button[data-plan][aria-pressed='true'] { background: var(--red); color: #fff; }
+.op-seg button:focus-visible { outline: 1px solid var(--lime); outline-offset: 2px; }
+/* The colour sub-toggle only means something while the splat is showing. */
+#operator:not([data-planview='3d']) .op-pmodes { display: none; }
+
+.op-splat { position: relative; flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; background: #000; display: none; }
+.op-splat canvas { position: absolute; inset: 0; display: block; }
+.op-splat .labels { position: absolute; inset: 0; }
+#operator[data-planview='3d'] .op-canvas { display: none; }
+#operator[data-planview='3d'] .op-splat { display: block; }
+
+.label.device.selected { color: #fff; background: var(--red); border-color: var(--red); }
+
+.op-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 2px 0; font: 400 9px var(--mono);
+  letter-spacing: 0.14em; color: var(--muted); }
+.op-legend span { display: flex; align-items: center; gap: 6px; }
+.lg { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }
+.lg.wall { background: #f5f5f5; }
+.lg.closed { height: 5px; border-radius: 1px; background: var(--red); }
+.lg.window { background: repeating-linear-gradient(90deg, #fff 0 4px, transparent 4px 7px); }
+.lg.origin { width: 10px; height: 10px; background: linear-gradient(var(--red), var(--red)) center / 100% 2px no-repeat,
+  linear-gradient(var(--red), var(--red)) center / 2px 100% no-repeat; border-radius: 0; }
+svg.lg { width: 18px; height: 14px; border-radius: 0; fill: none; stroke: var(--red); stroke-width: 1.5; }
+svg.lg .arc { stroke-dasharray: 2.5 2; stroke-width: 1; }
+/* The 3D splat has its own look; the 2D symbols don't apply there. */
+#operator[data-planview='3d'] .op-legend { display: none; }
+
+@media (max-width: 760px) {
+  .op-planhead { gap: 6px; }
+  .op-seg button { padding: 5px 8px; }
+}

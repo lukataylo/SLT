@@ -17,6 +17,10 @@ const params = new URLSearchParams(location.search);
 const scene = new AdminScene($('stage'));
 const operator = new OperatorView($('operator'));
 let view = 'operator';
+// Inside the operator view, the floor-plan panel shows the 2D plan or the 3D
+// splat scene (the same scene as the full 3D view, moved into the panel).
+let planMode = '2d';
+const sceneShowing = () => view === '3d' || planMode === '3d';
 
 const state = { map: null, devices: [], connected: false };
 const pad = (n, w = 2) => String(n).padStart(w, '0');
@@ -68,7 +72,7 @@ async function handleFrame(meta, jpeg) {
   try {
     const blob = new Blob([jpeg], { type: 'image/jpeg' });
     if (view === 'operator') operator.setFrame(meta, await createImageBitmap(blob));
-    else scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
+    if (sceneShowing()) scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
     const prev = thumbs.get(meta.id);
     if (prev) URL.revokeObjectURL(prev);
     const url = URL.createObjectURL(blob);
@@ -163,14 +167,33 @@ $('devices').addEventListener('keydown', (e) => {
   const row = e.target.closest('.device-row');
   if (row && (e.key === 'Enter' || e.key === ' ')) scene.focusOn(row.dataset.id);
 });
-function setMode(mode) {
+// Splat colours are remembered separately for the full 3D view (default
+// DEPTH) and the operator's 3D panel (default TRUE COLOUR); the one scene
+// takes whichever applies to where it's showing.
+let fullMode = 'depth';
+let panelMode = 'colour';
+function applySceneMode() {
+  const mode = view === '3d' ? fullMode : panelMode;
   scene.setMode(mode);
   document.body.dataset.mode = mode;
+}
+function setMode(mode) {
+  fullMode = mode;
   for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
   try {
     localStorage.setItem('slt.admin.mode', mode);
   } catch {}
+  applySceneMode();
 }
+function setPanelMode(mode) {
+  panelMode = mode === 'depth' ? 'depth' : 'colour';
+  operator.setPanelColour(panelMode);
+  try {
+    localStorage.setItem('slt.admin.panelMode', panelMode);
+  } catch {}
+  applySceneMode();
+}
+for (const b of document.querySelectorAll('button[data-pmode]')) b.addEventListener('click', () => setPanelMode(b.dataset.pmode));
 for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
 $('cutaway').addEventListener('click', () => {
   const on = $('cutaway').getAttribute('aria-pressed') !== 'true';
@@ -183,6 +206,11 @@ try {
   savedMode = localStorage.getItem('slt.admin.mode') ?? 'depth';
 } catch {}
 setMode(savedMode === 'colour' ? 'colour' : 'depth');
+try {
+  setPanelMode(localStorage.getItem('slt.admin.panelMode') ?? 'colour');
+} catch {
+  setPanelMode('colour');
+}
 
 // OPERATOR (floor plan + every camera) or the 3D bird's-eye view. The 3D
 // scene only renders while it's showing: splats are expensive.
@@ -191,10 +219,39 @@ function setView(next) {
   document.body.dataset.view = view;
   for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   if (view === 'operator') operator.relayout();
+  placeScene();
   try {
     localStorage.setItem('slt.admin.view', view);
   } catch {}
 }
+
+// The scene lives on the full-screen stage in the 3D view, and in the
+// operator's floor-plan panel in 3D SPLAT. It only renders while visible.
+function placeScene() {
+  if (view === 'operator' && planMode === '3d') scene.attach(operator.splatHost, { panel: true });
+  else scene.attach($('stage'), { panel: false });
+  applySceneMode();
+}
+
+function setPlanMode(next) {
+  planMode = next === '3d' ? '3d' : '2d';
+  operator.setPlanMode(planMode);
+  placeScene();
+  try {
+    localStorage.setItem('slt.admin.plan', planMode);
+  } catch {}
+}
+for (const b of document.querySelectorAll('button[data-plan]')) b.addEventListener('click', () => setPlanMode(b.dataset.plan));
+try {
+  planMode = localStorage.getItem('slt.admin.plan') === '3d' ? '3d' : '2d';
+} catch {}
+operator.setPlanMode(planMode);
+
+// A device picked on the plan or the camera wall is picked in 3D too.
+operator.onSelect = (id) => {
+  scene.highlight(id);
+  if (id && planMode === '3d') scene.focusOn(id);
+};
 for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
 let savedView = null;
 try {
@@ -258,7 +315,10 @@ renderStats();
 
 const loop = (now) => {
   if (view === '3d') scene.render(now);
-  else operator.render(now);
+  else {
+    operator.render(now);
+    if (planMode === '3d') scene.render(now);
+  }
   requestAnimationFrame(loop);
 };
 requestAnimationFrame(loop);

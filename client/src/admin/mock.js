@@ -20,18 +20,15 @@ const ROOMS = [
     id: 'r2',
     name: 'KITCHEN',
     origin: [5, 0],
-    walls: [[5, 0, 9, 0], [9, 0, 9, 7], [5, 7, 9, 7], [5, 3, 6.5, 3], [7.5, 3, 9, 3], [5, 4.5, 5, 7]],
-    openings: [
-      { kind: 'door', s: [6.5, 3, 7.5, 3], y0: 0, y1: 2.1, seen: 2 },
-      { kind: 'window', s: [9, 4, 9, 6], y0: 1.0, y1: 2.2, seen: 1 },
-    ],
+    walls: [[5, 0, 9, 0], [9, 0, 9, 1.2], [9, 2.1, 9, 7], [5, 7, 9, 7], [5, 3, 6.5, 3], [7.5, 3, 9, 3], [5, 4.5, 5, 7]],
+    openings: [{ kind: 'window', s: [9, 4, 9, 6], y0: 1.0, y1: 2.2, seen: 1 }],
     floor: [[5, 0], [9, 0], [9, 7], [5, 7]],
   },
   {
     id: 'r3',
     name: 'BEDROOM',
     origin: [0, 4.5],
-    walls: [[0, 4.5, 0, 7], [0, 7, 5, 7], [5, 4.5, 5, 7]],
+    walls: [[0, 4.5, 0, 7], [0, 7, 1.6, 7], [2.5, 7, 5, 7], [5, 4.5, 5, 7]],
     openings: [{ kind: 'window', s: [0, 5, 0, 6.5], y0: 1.0, y1: 2.2, seen: 1 }],
     floor: [[0, 4.5], [5, 4.5], [5, 7], [0, 7]],
   },
@@ -55,6 +52,16 @@ const PATHS = [
   [[6, 1.5], [8.2, 1.5], [8.2, 5.5], [6, 5.5], [7, 3.5]],
   [[1, 5.6], [4, 5.6], [4, 6.4], [1, 6.4]],
   [[7.5, 6.2], [5.8, 6.2], [5.8, 4.2], [7.5, 4.2]],
+];
+
+// What the server's findDoorways reports for these walls: door-sized gaps in
+// a wall line, closed where a door surface was scanned in the gap.
+const DOORWAYS = [
+  { s: [3, 4.5, 4, 4.5], width: 1, state: 'closed' }, // living ↔ bedroom, scanned door
+  { s: [6.5, 3, 7.5, 3], width: 1, state: 'open' }, // kitchen, south part ↔ north part
+  { s: [5, 3, 5, 4.5], width: 1.5, state: 'open' }, // living ↔ kitchen
+  { s: [1.6, 7, 2.5, 7], width: 0.9, state: 'open' }, // bedroom, outside
+  { s: [9, 1.2, 9, 2.1], width: 0.9, state: 'closed' }, // kitchen back door, shut
 ];
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -102,6 +109,7 @@ function mapJson(version, seenBoost) {
     rooms,
     walls: rooms.flatMap((r) => r.walls),
     seen: rooms.flatMap((r) => r.seen),
+    doorways: DOORWAYS,
     plan: {
       id: 'plan-1',
       name: 'FLAT 4B',
@@ -119,7 +127,7 @@ const N = 127;
 
 // Points, colours and normals for one room, like a LiDAR phone sends them:
 // one sample per 5 cm voxel of every surface, with a little tracking noise.
-const STEP = 0.05;
+const STEP = new URLSearchParams(location.search).has('lite') ? 0.2 : 0.05;
 function sampleRoom(room) {
   const points = [];
   const colors = [];
