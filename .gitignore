@@ -1,0 +1,8 @@
+node_modules/
+dist/
+recordings/
+client/public/splats/*
+!client/public/splats/.gitkeep
+.DS_Store
+ios/**/xcuserdata/
+ios/build/

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="Point your phone at a wall and see what the phones on the other side see, live." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="See Through" />
+    <title>See Through Walls</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Doto:wght@600;800&family=Space+Grotesk:wght@400;500&family=Space+Mono:wght@400;700&display=swap"
+    />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <video id="camera" playsinline muted></video>
+    <canvas id="world"></canvas>
+
+    <header id="hud" hidden>
+      <div class="live"><span id="conn" class="dot"></span><span id="connLabel">OFFLINE</span></div>
+      <div class="counters">
+        <div><b id="peerCount">00</b><span>PEERS</span></div>
+        <div><b id="liveCount">00</b><span>LIVE</span></div>
+        <div id="fpsBox"><b id="fpsOut">00</b><span>FPS OUT</span></div>
+      </div>
+      <button id="xray" class="pill toggle" aria-pressed="false"><span class="led"></span>X-RAY</button>
+    </header>
+
+    <aside id="mapPanel" hidden>
+      <div class="panel-head"><span>FLOOR 02</span><span id="coords">0.0, 0.0</span></div>
+      <canvas id="minimap"></canvas>
+      <p id="hint"></p>
+    </aside>
+
+    <footer id="controls" hidden>
+      <label class="slider">
+        <span>WALLS</span>
+        <input id="opacity" type="range" min="0" max="100" value="60" />
+        <output id="opacityOut">60</output>
+      </label>
+      <button id="place" class="pill">SET SPOT</button>
+    </footer>
+
+    <form id="join">
+      <div class="join-top"><span class="dot red"></span><span>V0.1 · SLT</span></div>
+      <h1>SEE<br />THROUGH<br />WALLS</h1>
+      <p class="lede">Every phone is a camera and a window. Point yours at a wall to see what the people on the other side see.</p>
+
+      <label class="field">
+        <span>NAME</span>
+        <input id="name" maxlength="24" autocomplete="nickname" placeholder="Your name" required />
+      </label>
+
+      <fieldset class="field">
+        <legend>TRACKING</legend>
+        <div class="seg">
+          <input type="radio" name="mode" id="modeMotion" value="motion" />
+          <label for="modeMotion">PHONE</label>
+          <input type="radio" name="mode" id="modeSim" value="sim" />
+          <label for="modeSim">DESKTOP</label>
+        </div>
+      </fieldset>
+
+      <label class="switch">
+        <span>SHARE CAMERA</span>
+        <input id="share" type="checkbox" role="switch" />
+        <i aria-hidden="true"></i>
+      </label>
+
+      <button type="submit" class="cta"><span>JOIN</span><span class="dot red"></span></button>
+      <p id="joinError" role="alert"></p>
+    </form>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
