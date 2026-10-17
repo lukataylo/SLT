@@ -67,7 +67,10 @@ struct RoomSheet: View {
                 } header: {
                     Text("NEW ROOM").mono(10)
                 } footer: {
-                    Text("Its origin is where you're standing. Walls scanned from now on belong to it.").font(.footnote)
+                    Text(relay.alignment.aligned
+                         ? "Its origin is where you're standing. Walls scanned from now on belong to it."
+                         : "This phone isn't on the map yet. Pair with a phone that is, or scan walls the map already has, then add rooms.")
+                        .font(.footnote)
                 }
 
                 Section {

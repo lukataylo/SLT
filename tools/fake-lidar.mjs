@@ -75,23 +75,42 @@ const toLocal3 = (x, y, z) => {
   return [lx, y + FLOOR_Y, lz];
 };
 
-// What a LiDAR sweep returns around the phone: wall surfaces and floor.
+// What a coloured LiDAR sweep returns around the phone: wall surfaces in a
+// few paint colours and a wood floor, with surface normals (×127).
+const PAINT = [[214, 206, 190], [120, 150, 170], [190, 120, 90], [225, 225, 220], [90, 110, 95]];
+const jitter = (c, k = 14) => c.map((v) => Math.max(0, Math.min(255, Math.round(v + (Math.random() * 2 - 1) * k))));
 function cloudAround(px, pz) {
-  const pts = [];
-  for (const s of PLAN) {
-    for (let k = 0; k < 12; k++) {
+  const points = [];
+  const colors = [];
+  const normals = [];
+  const add = (x, y, z, rgb, n) => {
+    points.push(...toLocal3(x, y, z));
+    colors.push(...rgb);
+    const [nx, nz] = transformPoint2(n[0], n[2], { yaw: toLocal.yaw, t: [0, 0, 0] });
+    normals.push(Math.round(nx * 127), Math.round(n[1] * 127), Math.round(nz * 127));
+  };
+  PLAN.forEach((s, w) => {
+    const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
+    const n = [-(s[3] - s[1]) / len, 0, (s[2] - s[0]) / len];
+    for (let k = 0; k < 160; k++) {
       const f = Math.random();
       const x = s[0] + (s[2] - s[0]) * f;
       const z = s[1] + (s[3] - s[1]) * f;
-      if (near(x, z, px, pz)) pts.push(...toLocal3(x + noise(), Math.random() * WALL_HEIGHT, z + noise()));
+      const y = Math.random() * WALL_HEIGHT;
+      if (!near(x, z, px, pz)) continue;
+      // A darker skirting board near the floor.
+      add(x + noise() * 0.3, y, z + noise() * 0.3, jitter(y < 0.12 ? [60, 55, 50] : PAINT[w % PAINT.length]), n);
     }
-  }
-  for (let k = 0; k < 120; k++) {
+  });
+  for (let k = 0; k < 500; k++) {
     const x = px + (Math.random() * 2 - 1) * SIGHT * 0.7;
     const z = pz + (Math.random() * 2 - 1) * SIGHT * 0.7;
-    if (x > 0 && x < 9 && z > 0 && z < 7) pts.push(...toLocal3(x, noise() * 0.3, z));
+    if (x <= 0 || x >= 9 || z <= 0 || z >= 7) continue;
+    // Floorboards: stripes of slightly different wood along x.
+    const board = Math.floor(z / 0.18) % 3;
+    add(x, noise() * 0.05, z, jitter([150 + board * 12, 105 + board * 8, 70], 10), [0, 1, 0]);
   }
-  return pts;
+  return { points, colors, normals };
 }
 
 const url = new URL('/ws', args.server.replace(/^http/, 'ws'));
@@ -146,7 +165,7 @@ ws.on('open', () => {
       const floor = floorSeen.slice(-200).map(([x, z]) => transformPoint2(x, z, toLocal));
       ws.send(JSON.stringify({ t: 'planes', walls, openings, floor, floorY: FLOOR_Y }));
     }
-    if (tick % 30 === 0) ws.send(JSON.stringify({ t: 'cloud', points: cloudAround(px, pz) }));
+    if (tick % 30 === 0) ws.send(JSON.stringify({ t: 'cloud', ...cloudAround(px, pz) }));
     tick++;
   }, 100);
   if (+args.seconds) setTimeout(() => (clearInterval(timer), ws.close()), +args.seconds * 1000);

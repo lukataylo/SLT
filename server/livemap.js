@@ -4,8 +4,8 @@ import { convexHull, fuseSegments, invert, polygonWalls, reinforce, register, sa
 // there are enough of them to align against.
 const REINFORCED_SEEN = 2;
 const MIN_ANCHOR_LENGTH = 4; // metres
-const CLOUD_VOXEL = 0.1; // metres
-const MAX_CLOUD_POINTS = 80000; // per room
+const CLOUD_VOXEL = 0.05; // metres: one splat per 5 cm cell
+const MAX_CLOUD_POINTS = 300000; // per room
 
 const round = (v, k = 1000) => Math.round(v * k) / k;
 
@@ -44,10 +44,11 @@ function reinforceOpenings(base, observed) {
 // count of the scan sessions that confirmed them; phones currently scanning
 // contribute live observations on top, committed into the base when they leave.
 export class LiveMap {
-  constructor({ rooms = [], walls = null, origin = null, plan = null, onChange = null } = {}) {
+  constructor({ rooms = [], walls = null, origin = null, plan = null, onChange = null, onCloudChange = null } = {}) {
     this.origin = origin;
     this.plan = plan;
     this.onChange = onChange;
+    this.onCloudChange = onCloudChange;
     this.contributions = new Map();
     this.version = 0;
     this.rooms = rooms.map((r) => ({
@@ -158,27 +159,53 @@ export class LiveMap {
     this.rebuild();
   }
 
-  // Adds LiDAR points (map frame, flat xyz) to a room's cloud on a 10 cm voxel
-  // grid. Returns only the points that were new, for streaming to viewers.
-  addCloud(roomId, flat) {
+  // Adds coloured LiDAR points (map frame) to a room's cloud, one per 5 cm
+  // voxel. Each point is [x, y, z, r, g, b, nx, ny, nz]: true camera colour and
+  // the surface normal (×127), so viewers can draw it as an oriented splat.
+  // A voxel seen again blends its colour. Returns only new points.
+  addCloud(roomId, points, colors = [], normals = []) {
     const room = this.room(roomId);
-    if (!room) return [];
-    const added = [];
-    for (let i = 0; i + 2 < flat.length && room.cloud.size < MAX_CLOUD_POINTS; i += 3) {
-      const [x, y, z] = [flat[i], flat[i + 1], flat[i + 2]];
+    const added = { points: [], colors: [], normals: [] };
+    if (!room) return added;
+    for (let i = 0; i + 2 < points.length; i += 3) {
+      const [x, y, z] = [points[i], points[i + 1], points[i + 2]];
       if (![x, y, z].every(Number.isFinite)) continue;
+      const rgb = [0, 1, 2].map((k) => clampInt(colors[i + k], 0, 255, 150));
+      const n = [0, 1, 2].map((k) => clampInt(normals[i + k], -127, 127, 0));
       const key = `${Math.round(x / CLOUD_VOXEL)},${Math.round(y / CLOUD_VOXEL)},${Math.round(z / CLOUD_VOXEL)}`;
-      if (room.cloud.has(key)) continue;
-      const p = [round(x, 100), round(y, 100), round(z, 100)];
-      room.cloud.set(key, p);
-      added.push(...p);
+      const prev = room.cloud.get(key);
+      if (prev) {
+        for (let k = 0; k < 3; k++) prev[3 + k] = Math.round(prev[3 + k] * 0.7 + rgb[k] * 0.3);
+        continue;
+      }
+      if (room.cloud.size >= MAX_CLOUD_POINTS) continue;
+      const p = [round(x, 1000), round(y, 1000), round(z, 1000)];
+      room.cloud.set(key, [...p, ...rgb, ...n]);
+      added.points.push(...p);
+      added.colors.push(...rgb);
+      added.normals.push(...n);
     }
-    if (added.length) this.onChange?.(this);
+    if (added.points.length) this.onCloudChange?.(this);
     return added;
   }
 
-  clouds() {
-    return Object.fromEntries(this.rooms.map((r) => [r.id, [...r.cloud.values()].flat()]));
+  // Per-room clouds as flat arrays, for shared/cloud.js encodeClouds.
+  cloudRooms() {
+    return this.rooms.map((r) => {
+      const pts = [...r.cloud.values()];
+      return { id: r.id, points: pts.flatMap((p) => p.slice(0, 3)), colors: pts.flatMap((p) => p.slice(3, 6)), normals: pts.flatMap((p) => p.slice(6, 9)) };
+    });
+  }
+
+  loadClouds(rooms) {
+    for (const { id, points, colors, normals } of rooms) {
+      const room = this.room(id);
+      if (!room) continue;
+      for (let i = 0; i + 2 < points.length; i += 3) {
+        const p = [points[i], points[i + 1], points[i + 2], colors[i], colors[i + 1], colors[i + 2], normals[i], normals[i + 1], normals[i + 2]];
+        room.cloud.set(p.slice(0, 3).map((v) => Math.round(v / CLOUD_VOXEL)).join(','), p);
+      }
+    }
   }
 
   // --- Floor plan link -------------------------------------------------------
@@ -289,19 +316,23 @@ export class LiveMap {
         walls: r.base,
         openings: r.openings,
         floor: r.floor,
-        cloud: [...r.cloud.values()].flat(),
       })),
     };
   }
 }
 
+// Older map files kept an uncoloured xyz cloud inline.
 function cloudFromFlat(flat) {
   const cloud = new Map();
   for (let i = 0; i + 2 < flat.length; i += 3) {
-    const p = [flat[i], flat[i + 1], flat[i + 2]];
-    cloud.set(p.map((v) => Math.round(v / CLOUD_VOXEL)).join(','), p);
+    const p = [flat[i], flat[i + 1], flat[i + 2], 150, 150, 150, 0, 0, 0];
+    cloud.set(p.slice(0, 3).map((v) => Math.round(v / CLOUD_VOXEL)).join(','), p);
   }
   return cloud;
+}
+
+function clampInt(v, lo, hi, fallback) {
+  return Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : fallback;
 }
 
 function pointInHull(p, hull) {

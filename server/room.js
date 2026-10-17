@@ -10,6 +10,7 @@ export const MAX_WALLS_PER_PEER = 300;
 const MAX_OPENINGS_PER_PEER = 100;
 const MAX_FLOOR_POINTS = 400;
 const MAX_CLOUD_PER_MESSAGE = 3 * 8000;
+const ADMIN_FRAME_INTERVAL_MS = 500;
 
 // How sure registration must be before a phone's poses are trusted in the map.
 const MIN_INLIER_FRACTION = 0.6;
@@ -47,8 +48,9 @@ export class Room {
     const id = `p${this.nextId++}`;
     if (role === 'admin') {
       // Admin viewers watch everything but are not peers: nobody sees them.
-      this.admins.set(id, { id, socket });
-      this.sendJson({ socket }, { t: 'admin', map: this.map.toJSON(), devices: this.devices(), clouds: this.map.clouds() });
+      // Clouds are fetched separately as a binary snapshot (GET /api/cloud).
+      this.admins.set(id, { id, socket, lastFrameSent: new Map() });
+      this.sendJson({ socket }, { t: 'admin', map: this.map.toJSON(), devices: this.devices() });
       return id;
     }
     const peer = { id, name: cleanName(name, id), socket, pose: null, lastFrame: null, lastFrameAt: 0, lastSeenAt: this.now() };
@@ -109,10 +111,31 @@ export class Room {
       if (Number.isFinite(msg.floorY)) peer.floorY = msg.floorY;
       this.alignPeer(peer);
     } else if (msg?.t === 'cloud' && peer.local && Array.isArray(msg.points)) {
-      this.addCloud(peer, msg.points.slice(0, MAX_CLOUD_PER_MESSAGE));
+      const n = MAX_CLOUD_PER_MESSAGE;
+      const list = (a) => (Array.isArray(a) ? a.slice(0, n) : []);
+      this.addCloud(peer, msg.points.slice(0, n), list(msg.colors), list(msg.normals));
     } else if (msg?.t === 'room' && peer.local) {
       this.roomCommand(peer, msg);
+    } else if (msg?.t === 'collab' && peer.local && typeof msg.data === 'string') {
+      // ARKit collaboration data: opaque to us, relayed to the other LiDAR
+      // phones so their sessions merge into one shared coordinate space.
+      const text = JSON.stringify({ t: 'collab', from: id, data: msg.data });
+      for (const p of this.peers.values()) if (p.local && p.id !== id && p.socket.readyState === OPEN) p.socket.send(text);
+    } else if (msg?.t === 'pair' && peer.local) {
+      this.pairPeer(peer, msg.alignment);
     }
+  }
+
+  // A phone whose ARKit session merged with an aligned phone's receives that
+  // phone's map-origin anchor, and from it computes its own alignment exactly.
+  pairPeer(peer, a) {
+    const valid = a && Number.isFinite(a.yaw) && Array.isArray(a.t) && a.t.length === 3 && a.t.every(Number.isFinite);
+    if (!valid || !this.map.origin) return;
+    peer.alignment = { yaw: a.yaw, t: [...a.t] };
+    peer.pendingJump = null;
+    if (!peer.roomId || !this.map.room(peer.roomId)) peer.roomId = this.map.roomAt(transformPoint2(0, 0, peer.alignment))?.id ?? null;
+    this.sendAlign(peer, { method: 'paired', correction: 'locked' });
+    this.broadcastMap();
   }
 
   // --- Rooms ------------------------------------------------------------------
@@ -126,7 +149,7 @@ export class Room {
         this.sendJson(p, { t: 'reset', scope: 'map' });
         this.sendAlign(p, null);
       }
-      this.broadcastAdmins({ t: 'cloud-reset', roomId: null });
+      this.broadcastCloudReset(null);
       this.broadcastMap();
       return;
     }
@@ -153,7 +176,7 @@ export class Room {
       for (const p of this.peers.values()) {
         if (p.local && p.roomId === roomId) this.sendJson(p, { t: 'reset', scope: 'room', roomId });
       }
-      this.broadcastAdmins({ t: 'cloud-reset', roomId });
+      this.broadcastCloudReset(roomId);
       this.broadcastMap();
     }
   }
@@ -175,18 +198,31 @@ export class Room {
     return peer.pose ? [peer.pose.p[0], peer.pose.p[2]] : null;
   }
 
-  addCloud(peer, flat) {
+  addCloud(peer, flat, colors, normals) {
     if (!peer.alignment || !peer.roomId) return;
     const T = peer.alignment;
+    const rot = { yaw: T.yaw, t: [0, 0, 0] };
     const out = new Array(flat.length);
+    const outNormals = new Array(normals.length);
     for (let i = 0; i + 2 < flat.length; i += 3) {
       const [x, z] = transformPoint2(flat[i], flat[i + 2], T);
       out[i] = x;
       out[i + 1] = flat[i + 1] + T.t[1];
       out[i + 2] = z;
+      if (i + 2 < normals.length) {
+        // Normals only rotate.
+        const [nx, nz] = transformPoint2(normals[i], normals[i + 2], rot);
+        outNormals[i] = nx;
+        outNormals[i + 1] = normals[i + 1];
+        outNormals[i + 2] = nz;
+      }
     }
-    const added = this.map.addCloud(peer.roomId, out);
-    if (added.length) this.broadcastAdmins({ t: 'cloud', roomId: peer.roomId, points: added });
+    const added = this.map.addCloud(peer.roomId, out, colors, outNormals);
+    if (!added.points.length) return;
+    // Viewers (admins and browsers) draw the cloud; LiDAR phones don't need it.
+    const text = JSON.stringify({ t: 'cloud', roomId: peer.roomId, ...added });
+    for (const a of this.admins.values()) if (a.socket.readyState === OPEN) a.socket.send(text);
+    for (const p of this.peers.values()) if (!p.local && p.socket.readyState === OPEN) p.socket.send(text);
   }
 
   alignPeer(peer) {
@@ -197,9 +233,8 @@ export class Room {
     let result = null;
     const anyoneElseAligned = [...this.peers.values()].some((p) => p !== peer && p.alignment);
     if (!this.map.origin && !peer.alignment && !anyoneElseAligned) {
-      // No fixed origin yet: this phone's scan founds the map frame. The
-      // origin is saved with the map and never re-founded afterwards.
-      if (!peer.localWalls.length) return this.sendAlign(peer, null);
+      // No fixed origin yet: this phone founds the map frame where it stands,
+      // grounded on its floor. The origin is saved and never re-founded.
       this.map.found({ by: peer.name, at: new Date(this.now()).toISOString() });
       peer.alignment = { yaw: 0, t: [0, floorDy, 0] };
       result = { method: 'origin', correction: 'locked' };
@@ -284,6 +319,12 @@ export class Room {
     this.broadcastAdmins(msg);
   }
 
+  broadcastCloudReset(roomId) {
+    const msg = { t: 'cloud-reset', roomId };
+    this.broadcastAdmins(msg);
+    for (const p of this.peers.values()) if (!p.local) this.sendJson(p, msg);
+  }
+
   broadcastAdmins(msg) {
     if (!this.admins.size) return;
     const text = JSON.stringify(msg);
@@ -330,6 +371,12 @@ export class Room {
     peer.lastFrame = encodeFrame(meta, frame.jpeg);
     for (const other of this.peers.values()) {
       if (other.id !== id) this.sendBinary(other, peer.lastFrame);
+    }
+    // Admins see each device's camera as a picture on its beacon: 2 fps is plenty.
+    for (const admin of this.admins.values()) {
+      if (peer.lastFrameAt - (admin.lastFrameSent.get(id) ?? 0) < ADMIN_FRAME_INTERVAL_MS) continue;
+      admin.lastFrameSent.set(id, peer.lastFrameAt);
+      this.sendBinary(admin, peer.lastFrame);
     }
     this.recorder?.write(id, meta, frame.jpeg);
   }

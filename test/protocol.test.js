@@ -34,3 +34,16 @@ test('pickPose drops out-of-range intrinsics and extra fields', () => {
   const pose = pickPose({ p: [0, 0, 0], q: [0, 0, 0, 1], fov: 500, aspect: 1.5, id: 'evil' });
   assert.deepEqual(pose, { p: [0, 0, 0], q: [0, 0, 0, 1], aspect: 1.5 });
 });
+
+test('cloud snapshots round-trip, including odd id lengths and missing colours', async () => {
+  const { decodeClouds, encodeClouds } = await import('../shared/cloud.js');
+  const rooms = [
+    { id: 'r1', points: [1.5, 0, -2.25, 3, 2.5, 4], colors: [255, 0, 10, 1, 2, 3], normals: [127, 0, -127, 0, 127, 0] },
+    { id: 'kitchen', points: [0.125, 1, 2], colors: [], normals: [] },
+    { id: 'r3', points: [], colors: [], normals: [] },
+  ];
+  const out = decodeClouds(encodeClouds(rooms));
+  assert.deepEqual(out[0], rooms[0]);
+  assert.deepEqual(out[1], { id: 'kitchen', points: [0.125, 1, 2], colors: [150, 150, 150], normals: [0, 0, 0] });
+  assert.deepEqual(out[2].points, []);
+});

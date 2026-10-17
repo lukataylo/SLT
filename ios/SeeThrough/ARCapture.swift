@@ -13,12 +13,25 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     /// sent to the server for alignment and the shared map.
     @Published private(set) var scan = LocalScan()
     @Published private(set) var localMark: Mark?
+    /// Coloured points captured so far (own frame), for the 3D card.
+    let cloud = LocalCloud()
+    @Published private(set) var cloudVersion = 0
 
     let session = ARSession()
     var onPose: ((Pose) -> Void)?
     var onFrame: ((Pose, Data) -> Void)?
     var onScan: ((LocalScan) -> Void)?
-    var onCloud: (([Float]) -> Void)?
+    var onCloud: ((MeshProcessor.ColouredPoints) -> Void)?
+    /// ARKit collaboration data to send to the other phones.
+    var onCollaboration: ((Data) -> Void)?
+    /// Another phone's map-origin anchor arrived through collaboration: this
+    /// is where the shared map sits in our frame.
+    var onPeerMapOrigin: ((FloorTransform) -> Void)?
+    /// How many other phones ARKit has merged with.
+    @Published private(set) var participants = 0
+    private var mapAnchor: ARAnchor?
+    private static let mapAnchorName = "slt-map"
+
 
     private static let poseInterval: TimeInterval = 1.0 / 15
     private static let frameInterval: TimeInterval = 1.0 / 8
@@ -39,10 +52,18 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     private lazy var configuration: ARWorldTrackingConfiguration = {
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
+        // Phones that see the same place merge their maps (relayed via our
+        // server), which is how they pair into one coordinate space.
+        config.isCollaborationEnabled = true
         config.planeDetection = [.horizontal, .vertical]
         // The classified mesh finds doors and windows and feeds the point cloud.
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
             config.sceneReconstruction = .meshWithClassification
+        }
+        // LiDAR depth tells which mesh points the camera really sees, so wall
+        // colours don't bleed onto whatever is behind them.
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            config.frameSemantics.insert(.sceneDepth)
         }
         return config
     }()
@@ -63,7 +84,10 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         var options: ARSession.RunOptions = [.removeExistingAnchors]
         if restartTracking { options.insert(.resetTracking) }
         session.run(configuration, options: options)
+        mapAnchor = nil
         mesh.reset()
+        cloud.clear()
+        cloudVersion += 1
         meshOpenings = []
         scan = LocalScan()
         lastScan = 0
@@ -88,9 +112,20 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         }
         if hasLiDAR && now - lastMesh >= Self.meshInterval {
             lastMesh = now
-            mesh.process(MeshProcessor.snapshot(frame.anchors), walls: scan.walls) { [weak self] openings, points in
-                self?.meshOpenings = openings
-                if !points.isEmpty { self?.onCloud?(points) }
+            let sample = MeshProcessor.FrameSample(
+                image: frame.capturedImage,
+                depth: frame.sceneDepth?.depthMap,
+                cameraTransform: frame.camera.transform,
+                intrinsics: frame.camera.intrinsics,
+                resolution: frame.camera.imageResolution
+            )
+            mesh.process(MeshProcessor.snapshot(frame.anchors), walls: scan.walls, frame: sample) { [weak self] openings, points in
+                guard let self else { return }
+                self.meshOpenings = openings
+                guard !points.isEmpty else { return }
+                self.cloud.append(points)
+                self.cloudVersion += 1
+                self.onCloud?(points)
             }
         }
         // Encode off the main thread, at most one frame at a time, so ARKit
@@ -107,6 +142,44 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
                     if let jpeg { self.onFrame?(pose, jpeg) }
                 }
             }
+        }
+    }
+
+    // MARK: pairing
+
+    func session(_ session: ARSession, didOutputCollaborationData data: ARSession.CollaborationData) {
+        guard let encoded = try? NSKeyedArchiver.archivedData(withRootObject: data, requiringSecureCoding: true) else { return }
+        onCollaboration?(encoded)
+    }
+
+    func receiveCollaboration(_ data: Data) {
+        guard let collab = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ARSession.CollaborationData.self, from: data) else { return }
+        session.update(with: collab)
+    }
+
+    /// Shares where the map origin is in our frame, as an anchor that ARKit
+    /// syncs to merged phones. `alignment` takes our frame into the map.
+    func publishMapOrigin(_ alignment: FloorTransform) {
+        let transform = alignment.matrix.inverse
+        if let old = mapAnchor {
+            let moved = simd_distance(old.transform.columns.3, transform.columns.3)
+            if moved < 0.05 && abs(FloorTransform(matrix: old.transform).yaw - FloorTransform(matrix: transform).yaw) < 0.02 { return }
+            session.remove(anchor: old)
+        }
+        let anchor = ARAnchor(name: Self.mapAnchorName, transform: transform)
+        session.add(anchor: anchor)
+        mapAnchor = anchor
+    }
+
+    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) { handlePeerAnchors(anchors) }
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) { handlePeerAnchors(anchors) }
+
+    private func handlePeerAnchors(_ anchors: [ARAnchor]) {
+        participants = session.currentFrame?.anchors.filter { $0 is ARParticipantAnchor }.count ?? participants
+        for anchor in anchors where anchor.name == Self.mapAnchorName && anchor.sessionIdentifier != session.identifier {
+            // The anchor is the map origin expressed in our frame, so its
+            // inverse takes our frame into the map.
+            onPeerMapOrigin?(FloorTransform(matrix: anchor.transform.inverse))
         }
     }
 

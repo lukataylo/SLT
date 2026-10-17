@@ -16,6 +16,11 @@ struct FloorPlanScene: UIViewRepresentable {
     var me: Mark?
     var peers: [Mark]
     var origin: Origin?
+    /// This phone's coloured LiDAR points, drawn as a splat-like point cloud,
+    /// and the transform from its frame onto this view (alignment + floor).
+    var cloud: LocalCloud?
+    var cloudVersion = 0
+    var cloudTransform = matrix_identity_float4x4
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView(frame: .zero)
@@ -44,6 +49,9 @@ struct FloorPlanScene: UIViewRepresentable {
         private var lastSeen: [Int] = []
         private var lastExtras: ([Opening], [SIMD2<Float>], [WallSegment])?
         private let extrasNode = SCNNode()
+        private let cloudNode = SCNNode()
+        private var cloudBatches = 0
+        private var lastCloudVersion = -1
         private var lastOrigin: Origin??
 
         static let red = UIColor(red: 0.843, green: 0.098, blue: 0.129, alpha: 1)
@@ -58,6 +66,7 @@ struct FloorPlanScene: UIViewRepresentable {
             scene.rootNode.addChildNode(wallsNode)
             scene.rootNode.addChildNode(originNode)
             scene.rootNode.addChildNode(extrasNode)
+            scene.rootNode.addChildNode(cloudNode)
             scene.rootNode.addChildNode(meNode)
             frame(minX: -3, maxX: 3, minZ: -3, maxZ: 3)
         }
@@ -76,6 +85,7 @@ struct FloorPlanScene: UIViewRepresentable {
                 lastOrigin = plan.origin
                 rebuildOrigin(plan.origin)
             }
+            updateCloud(plan)
             meNode.isHidden = plan.me == nil
             if let me = plan.me { place(meNode, me) }
             while peerNodes.count < plan.peers.count {
@@ -87,6 +97,41 @@ struct FloorPlanScene: UIViewRepresentable {
                 node.isHidden = i >= plan.peers.count
                 if i < plan.peers.count { place(node, plan.peers[i]) }
             }
+        }
+
+        private func updateCloud(_ plan: FloorPlanScene) {
+            cloudNode.simdTransform = plan.cloudTransform
+            guard plan.cloudVersion != lastCloudVersion, let cloud = plan.cloud else { return }
+            lastCloudVersion = plan.cloudVersion
+            if cloud.batches.count < cloudBatches {
+                cloudNode.childNodes.forEach { $0.removeFromParentNode() }
+                cloudBatches = 0
+            }
+            for batch in cloud.batches.dropFirst(cloudBatches) {
+                cloudNode.addChildNode(Coordinator.points(batch))
+            }
+            cloudBatches = cloud.batches.count
+        }
+
+        /// Per-vertex coloured points, sized like small splats on screen.
+        static func points(_ batch: MeshProcessor.ColouredPoints) -> SCNNode {
+            let n = batch.points.count / 3
+            let vertices = (0..<n).map { SCNVector3(batch.points[$0 * 3], batch.points[$0 * 3 + 1], batch.points[$0 * 3 + 2]) }
+            let colors = batch.colors.map { Float($0) / 255 }
+            let colorSource = SCNGeometrySource(
+                data: colors.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .color, vectorCount: n,
+                usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12
+            )
+            let element = SCNGeometryElement(indices: (0..<Int32(n)).map { $0 }, primitiveType: .point)
+            element.pointSize = 6
+            element.minimumPointScreenSpaceRadius = 1.5
+            element.maximumPointScreenSpaceRadius = 5
+            let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices), colorSource], elements: [element])
+            let material = SCNMaterial()
+            material.lightingModel = .constant
+            material.diffuse.contents = UIColor.white
+            geometry.materials = [material]
+            return SCNNode(geometry: geometry)
         }
 
         private func place(_ node: SCNNode, _ mark: Mark) {

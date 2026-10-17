@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import UIKit
 
 /// A room in the shared map (map coordinates, floor at y = 0).
 struct MapRoom: Identifiable, Equatable {
@@ -24,6 +25,17 @@ struct PlanInfo: Equatable {
     var name: String
     var rooms: [Room]
     var placement: FloorTransform?
+}
+
+/// Another phone's latest camera frame and where it was taken (map frame).
+struct RemoteFeed {
+    var name: String
+    var position: SIMD3<Float>
+    var orientation: simd_quatf
+    var vfov: Float
+    var aspect: Float
+    var image: UIImage
+    var receivedAt: Date
 }
 
 /// WebSocket link to the relay. Connects with `frame=local`, so the server
@@ -53,6 +65,14 @@ final class RelayClient: ObservableObject {
     /// The server asks the phone to drop its local scan: on entering or
     /// resetting a room (keep tracking), or on a map reset (restart tracking).
     var onReset: ((_ restartTracking: Bool) -> Void)?
+    /// ARKit collaboration data from another phone, to feed our session.
+    var onCollaboration: ((Data) -> Void)?
+
+    /// Other phones' live video, by peer id, for the x-ray view.
+    private(set) var feeds: [String: RemoteFeed] = [:]
+    @Published private(set) var feedsVersion = 0
+    private var names: [String: String] = [:]
+    private let decodeQueue = DispatchQueue(label: "slt.feeds", qos: .userInitiated)
 
     private var task: URLSessionWebSocketTask?
     private var target: (server: URL, name: String)?
@@ -104,14 +124,28 @@ final class RelayClient: ObservableObject {
         sendText(message)
     }
 
-    func send(cloud points: [Float]) {
-        sendText(["t": "cloud", "points": points.map { (Double($0) * 100).rounded() / 100 }])
+    func send(cloud: MeshProcessor.ColouredPoints) {
+        sendText([
+            "t": "cloud",
+            "points": cloud.points.map { (Double($0) * 1000).rounded() / 1000 },
+            "colors": cloud.colors.map(Int.init),
+            "normals": cloud.normals.map(Int.init),
+        ])
     }
 
     func newRoom(name: String, planRoomId: String?) {
         var message: [String: Any] = ["t": "room", "action": "new", "name": name]
         if let planRoomId { message["planRoomId"] = planRoomId }
         sendText(message)
+    }
+
+    func send(collaboration data: Data) {
+        sendText(["t": "collab", "data": data.base64EncodedString()])
+    }
+
+    /// Our alignment as worked out from a paired phone's map-origin anchor.
+    func pair(_ alignment: FloorTransform) {
+        sendText(["t": "pair", "alignment": ["yaw": Double(alignment.yaw), "t": [Double(alignment.tx), Double(alignment.ty), Double(alignment.tz)]]])
     }
 
     func switchRoom(_ id: String) { sendText(["t": "room", "action": "switch", "roomId": id]) }
@@ -150,7 +184,11 @@ final class RelayClient: ObservableObject {
                 switch result {
                 case .success(let message):
                     self.connected = true
-                    if case .string(let text) = message { self.handle(text) }
+                    switch message {
+                    case .string(let text): self.handle(text)
+                    case .data(let data): self.handleFrame(data)
+                    @unknown default: break
+                    }
                     self.receive(on: task)
                 case .failure:
                     self.connected = false
@@ -173,15 +211,24 @@ final class RelayClient: ObservableObject {
             peers = list.count
             peerMarks = [:]
             for peer in list {
+                if let id = peer["id"] as? String { names[id] = peer["name"] as? String }
                 if let id = peer["id"] as? String, let pose = peer["pose"] as? [String: Any], let mark = Self.mark(pose) {
                     peerMarks[id] = mark
                 }
             }
             applyMap(msg["map"] as? [String: Any] ?? [:])
-        case "join": peers += 1
+        case "join":
+            peers += 1
+            if let id = msg["id"] as? String { names[id] = msg["name"] as? String }
         case "leave":
             peers = max(0, peers - 1)
-            if let id = msg["id"] as? String { peerMarks[id] = nil }
+            if let id = msg["id"] as? String {
+                peerMarks[id] = nil
+                feeds[id] = nil
+                feedsVersion += 1
+            }
+        case "collab":
+            if let b64 = msg["data"] as? String, let data = Data(base64Encoded: b64) { onCollaboration?(data) }
         case "pose":
             if let id = msg["id"] as? String, let mark = Self.mark(msg) { peerMarks[id] = mark }
         case "map": applyMap(msg)
@@ -198,9 +245,40 @@ final class RelayClient: ObservableObject {
                 match: msg["inlierFraction"] as? Double,
                 ambiguous: msg["ambiguous"] as? Bool ?? false,
                 needsFloor: msg["needsFloor"] as? Bool ?? false,
-                transform: FloorTransform(yaw: Float(a?["yaw"] as? Double ?? 0), tx: Float(t.first ?? 0), tz: Float(t.count > 2 ? t[2] : 0))
+                transform: FloorTransform(yaw: Float(a?["yaw"] as? Double ?? 0), tx: Float(t.first ?? 0), tz: Float(t.count > 2 ? t[2] : 0),
+                                          ty: Float(t.count > 1 ? t[1] : 0))
             )
         default: break
+        }
+    }
+
+    /// Binary video frame: [u16 metaLen][meta JSON][JPEG]. Decoded off the main
+    /// thread; a frame arriving while the previous one decodes replaces it.
+    private func handleFrame(_ data: Data) {
+        guard data.count > 2 else { return }
+        let metaLen = Int(data[data.startIndex]) << 8 | Int(data[data.startIndex + 1])
+        guard data.count > 2 + metaLen,
+              let meta = try? JSONSerialization.jsonObject(with: data.subdata(in: data.startIndex + 2 ..< data.startIndex + 2 + metaLen)) as? [String: Any],
+              let id = meta["id"] as? String,
+              let p = meta["p"] as? [Double], p.count == 3,
+              let q = meta["q"] as? [Double], q.count == 4 else { return }
+        let jpeg = data.subdata(in: data.startIndex + 2 + metaLen ..< data.endIndex)
+        let name = names[id] ?? id
+        decodeQueue.async {
+            guard let image = UIImage(data: jpeg)?.preparingForDisplay() else { return }
+            let feed = RemoteFeed(
+                name: name,
+                position: SIMD3(Float(p[0]), Float(p[1]), Float(p[2])),
+                orientation: simd_quatf(ix: Float(q[0]), iy: Float(q[1]), iz: Float(q[2]), r: Float(q[3])),
+                vfov: Float(meta["fov"] as? Double ?? 50),
+                aspect: Float(meta["aspect"] as? Double ?? 4.0 / 3),
+                image: image,
+                receivedAt: Date()
+            )
+            Task { @MainActor in
+                self.feeds[id] = feed
+                self.feedsVersion += 1
+            }
         }
     }
 

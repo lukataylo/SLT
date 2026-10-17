@@ -203,13 +203,39 @@ test('the origin is founded once and survives a restart', () => {
   assert.ok(Math.abs(align.alignment.yaw - Math.PI / 2) < 0.02);
 });
 
-test('a phone with no walls yet does not found the origin', () => {
+test('a phone founds the map from the floor alone, no walls needed', () => {
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
   room.handleText(id, planes([]));
-  assert.equal(room.map.origin, null);
-  assert.equal(last(phone, 'align').aligned, false);
+  assert.equal(room.map.origin.by, 'A');
+  assert.equal(last(phone, 'align').aligned, true);
+});
+
+test('pairing: collaboration data is relayed between LiDAR phones and a paired phone is placed', () => {
+  const room = new Room();
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'A', frame: 'local' });
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'B', frame: 'local' });
+  const web = new FakeSocket();
+  room.join(web, { name: 'web' });
+
+  room.handleText(idA, JSON.stringify({ t: 'collab', data: 'AAEC' }));
+  assert.deepEqual(last(b, 'collab'), { t: 'collab', from: idA, data: 'AAEC' });
+  assert.equal(last(a, 'collab'), undefined, 'not echoed back');
+  assert.equal(last(web, 'collab'), undefined, 'browsers do not get ARKit data');
+
+  room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 1, t: [2, 1.3, 3] } }));
+  assert.equal(last(b, 'align'), undefined, 'no map yet, nothing to pair into');
+
+  room.handleText(idA, planes(ROOM));
+  room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 1, t: [2, 1.3, 3] } }));
+  const align = last(b, 'align');
+  assert.equal(align.method, 'paired');
+  assert.deepEqual(align.alignment, { yaw: 1, t: [2, 1.3, 3] });
+  room.handleText(idB, JSON.stringify({ t: 'pose', p: [0, 0, 0], q: [0, 0, 0, 1] }));
+  assert.ok(last(web, 'pose'), 'paired phone poses are relayed');
 });
 
 test('walls confirmed by more sessions gain weight', () => {
@@ -321,11 +347,22 @@ test('admins get a snapshot, map updates, devices and cloud deltas; peers never 
 
   room.handleText(id, planes(ROOM));
   assert.ok(last(admin, 'map'));
-  room.handleText(id, JSON.stringify({ t: 'cloud', points: [1, -1.3, 1, 1.02, -1.3, 1.01, 2, 0, 2] }));
+  const viewer = new FakeSocket();
+  room.join(viewer, { name: 'web' });
+  room.handleText(id, JSON.stringify({
+    t: 'cloud',
+    points: [1, -1.3, 1, 1.02, -1.3, 1.01, 2, 0, 2],
+    colors: [200, 100, 50, 0, 0, 0, 999, -5, 'x'],
+    normals: [127, 0, 0, 0, 0, 0, 0, 127, 0],
+  }));
   const cloud = last(admin, 'cloud');
   assert.equal(cloud.roomId, 'r1');
   assert.equal(cloud.points.length, 6, 'points within one voxel are deduplicated');
   assert.ok(Math.abs(cloud.points[1]) < 1e-9, 'cloud is grounded on the floor');
+  assert.deepEqual(cloud.colors, [200, 100, 50, 255, 0, 150], 'colours clamped, bad values greyed');
+  assert.deepEqual(cloud.normals.slice(0, 3), [127, 0, 0]);
+  assert.deepEqual(last(viewer, 'cloud').points, cloud.points, 'web viewers get the cloud too');
+  assert.equal(last(phone, 'cloud'), undefined, 'LiDAR phones do not');
 
   room.broadcastDevices();
   const dev = last(admin, 'devices').devices[0];

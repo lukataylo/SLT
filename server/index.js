@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { decodeClouds, encodeClouds } from '../shared/cloud.js';
 import { LiveMap } from './livemap.js';
 import { planApi } from './plans.js';
 import { Recorder } from './recorder.js';
@@ -28,7 +29,8 @@ function loadMap(file) {
     console.log(`[map] loaded ${saved.rooms?.length ?? 0} rooms, origin ${saved.origin ? 'fixed' : 'unset'}, plan ${saved.plan ? 'yes' : 'no'}`);
   } catch {}
   let timer = null;
-  return new LiveMap({
+  let cloudTimer = null;
+  const map = new LiveMap({
     ...saved,
     onChange: (map) => {
       clearTimeout(timer);
@@ -36,7 +38,25 @@ function loadMap(file) {
         writeFile(file, JSON.stringify(map.toFile())).catch((err) => console.error('[map] save:', err.message));
       }, 2000);
     },
+    // The coloured clouds are large, so they live in a binary file beside the
+    // map and are written less eagerly.
+    onCloudChange: (map) => {
+      if (cloudTimer) return;
+      cloudTimer = setTimeout(() => {
+        cloudTimer = null;
+        writeFile(cloudFile(file), encodeClouds(map.cloudRooms())).catch((err) => console.error('[cloud] save:', err.message));
+      }, 10000);
+    },
   });
+  try {
+    map.loadClouds(decodeClouds(readFileSync(cloudFile(file))));
+    console.log(`[cloud] loaded ${map.rooms.reduce((n, r) => n + r.cloud.size, 0)} points`);
+  } catch {}
+  return map;
+}
+
+function cloudFile(mapFile) {
+  return path.join(path.dirname(mapFile), 'cloud.bin');
 }
 
 // Railway stops containers with SIGTERM on redeploy: fold in the sessions of
@@ -46,6 +66,7 @@ function shutdown() {
   if (process.env.MAP_FILE) {
     try {
       writeFileSync(process.env.MAP_FILE, JSON.stringify(room.map.toFile()));
+      writeFileSync(cloudFile(process.env.MAP_FILE), encodeClouds(room.map.cloudRooms()));
     } catch (err) {
       console.error('[map] save on exit:', err.message);
     }
@@ -99,6 +120,12 @@ const server = createServer(async (req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return void res.end(JSON.stringify({ peers: room.peers.size, admins: room.admins.size, rooms: room.map.rooms.length, walls: room.map.walls.length, ...room.stats }));
+  }
+  // The splat cloud is what web viewers render, so it's as public as the app.
+  if (req.url.startsWith('/api/cloud')) {
+    const body = encodeClouds(room.map.cloudRooms());
+    res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': body.length, 'cache-control': 'no-cache' });
+    return void res.end(body);
   }
   if (req.url === '/map.json') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });

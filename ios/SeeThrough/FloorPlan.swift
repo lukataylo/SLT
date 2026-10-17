@@ -26,6 +26,30 @@ struct FloorTransform: Equatable {
     var yaw: Float = 0
     var tx: Float = 0
     var tz: Float = 0
+    /// Vertical shift that puts the floor at y = 0.
+    var ty: Float = 0
+
+    /// As a 4x4 matrix taking this phone's ARKit frame into the map frame.
+    var matrix: simd_float4x4 {
+        var m = simd_float4x4(simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)))
+        m.columns.3 = SIMD4(tx, ty, tz, 1)
+        return m
+    }
+
+    /// The alignment whose matrix is `m` (a gravity-aligned rigid transform).
+    init(matrix m: simd_float4x4) {
+        yaw = atan2(-m.columns.0.z, m.columns.0.x)
+        tx = m.columns.3.x
+        ty = m.columns.3.y
+        tz = m.columns.3.z
+    }
+
+    init(yaw: Float = 0, tx: Float = 0, tz: Float = 0, ty: Float = 0) {
+        self.yaw = yaw
+        self.tx = tx
+        self.tz = tz
+        self.ty = ty
+    }
 
     func apply(_ x: Float, _ z: Float) -> (Float, Float) {
         let c = cos(yaw), s = sin(yaw)
@@ -48,6 +72,9 @@ struct FloorPlanView: View {
     var me: Mark?
     var peers: [Mark]
     var origin: FloorPlanScene.Origin?
+    var cloud: LocalCloud?
+    var cloudVersion = 0
+    var cloudTransform = matrix_identity_float4x4
     var title: String
 
     var body: some View {
@@ -58,7 +85,8 @@ struct FloorPlanView: View {
                 Text("\(walls.count) WALLS · \(openings.filter { $0.kind == "door" }.count) DOORS · \(openings.filter { $0.kind == "window" }.count) WIN").font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
             }
             ZStack {
-                FloorPlanScene(walls: walls, seen: seen, openings: openings, floor: floor, target: target, me: me, peers: peers, origin: origin)
+                FloorPlanScene(walls: walls, seen: seen, openings: openings, floor: floor, target: target, me: me, peers: peers, origin: origin,
+                               cloud: cloud, cloudVersion: cloudVersion, cloudTransform: cloudTransform)
                 if walls.isEmpty {
                     Text("SWEEP ACROSS A WALL").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.gray)
                 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import simd
 
 private let red = Color(red: 0.843, green: 0.098, blue: 0.129)
 
@@ -10,10 +11,20 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showRooms = false
     @State private var mapExpanded = false
+    @State private var xray = true
+    @State private var showPairing = false
+    @State private var confirmNewMap = false
 
     var body: some View {
         ZStack {
-            ARPreview(session: capture.session).ignoresSafeArea()
+            ARPreview(
+                session: capture.session,
+                feeds: relay.feeds,
+                feedsVersion: relay.feedsVersion,
+                alignment: relay.alignment.aligned ? relay.alignment.transform : nil,
+                xray: xray
+            )
+            .ignoresSafeArea()
             LinearGradient(colors: [.black.opacity(0.75), .clear, .clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -35,6 +46,16 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings, onDismiss: reconnect) { settings }
         .sheet(isPresented: $showRooms) { RoomSheet(relay: relay) }
+        .sheet(isPresented: $showPairing) { PairingSheet(capture: capture, relay: relay) }
+        .confirmationDialog("Start a new map here? This deletes the saved map, its rooms and origin for everyone.",
+                            isPresented: $confirmNewMap, titleVisibility: .visible) {
+            Button("Start new map here", role: .destructive) { relay.resetMap() }
+        }
+        // An aligned phone shares where the map origin is, so phones that
+        // pair with it through ARKit land in the same map.
+        .onChange(of: relay.alignment.aligned ? relay.alignment.transform : nil) { _, transform in
+            if let transform { capture.publishMapOrigin(transform) }
+        }
     }
 
     private var header: some View {
@@ -47,6 +68,16 @@ struct ContentView: View {
             counter(relay.peers, "PEERS")
             counter(relay.rooms.count, "ROOMS").padding(.leading, 18)
             Spacer()
+            Button { xray.toggle() } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(xray ? red : Color.clear).overlay(Circle().stroke(xray ? red : .white, lineWidth: 1)).frame(width: 7, height: 7)
+                    Text("X-RAY").mono(11, weight: .bold)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .foregroundStyle(xray ? .black : .white)
+                .background(Capsule().fill(xray ? Color.white : Color.black.opacity(0.7)))
+                .overlay(Capsule().stroke(Color.white.opacity(0.18)))
+            }
             Button { showSettings = true } label: { pill("SETUP") }
                 .foregroundStyle(.white)
         }
@@ -99,6 +130,9 @@ struct ContentView: View {
                 me: capture.localMark.map { relay.alignment.transform.apply($0) },
                 peers: Array(relay.peerMarks.values),
                 origin: relay.originFoundedBy == nil ? nil : .fixed,
+                cloud: capture.cloud,
+                cloudVersion: capture.cloudVersion,
+                cloudTransform: cloudTransform(aligned: true),
                 title: relay.originFoundedBy.map { "SHARED MAP · ORIGIN BY \($0.uppercased())" } ?? "SHARED MAP · LIVE"
             )
         } else {
@@ -110,9 +144,25 @@ struct ContentView: View {
                 me: capture.localMark,
                 peers: [],
                 origin: .session,
+                cloud: capture.cloud,
+                cloudVersion: capture.cloudVersion,
+                cloudTransform: cloudTransform(aligned: false),
                 title: "LOCAL SCAN · SESSION START"
             )
         }
+    }
+
+    /// Places this phone's own-frame points in the card: grounded on the
+    /// floor, and rotated/moved onto the shared map once aligned.
+    private func cloudTransform(aligned: Bool) -> simd_float4x4 {
+        var m = matrix_identity_float4x4
+        m.columns.3.y = -(capture.scan.floorY ?? 0)
+        guard aligned else { return m }
+        let t = relay.alignment.transform
+        let rotation = simd_float4x4(simd_quatf(angle: t.yaw, axis: SIMD3(0, 1, 0)))
+        var translation = matrix_identity_float4x4
+        translation.columns.3 = SIMD4(t.tx, -(capture.scan.floorY ?? 0), t.tz, 1)
+        return translation * rotation
     }
 
     private var statusCard: some View {
@@ -123,16 +173,33 @@ struct ContentView: View {
                 Circle().fill(relay.alignment.aligned ? red : Color.white.opacity(0.25)).frame(width: 12, height: 12)
             }
             Text(alignDetail).font(.system(size: 14)).foregroundStyle(.gray)
+            if relay.connected && !relay.alignment.aligned && relay.originFoundedBy != nil {
+                // The saved map may be somewhere this phone can't see: never a dead end.
+                HStack(spacing: 10) {
+                    Button { showPairing = true } label: { action("PAIR WITH A PHONE", filled: true) }
+                    Button { confirmNewMap = true } label: { action("NEW MAP HERE", filled: false) }
+                }
+            }
             HStack(spacing: 8) {
                 chip(capture.hasLiDAR ? "LIDAR" : "NO LIDAR", on: capture.hasLiDAR)
                 chip(capture.tracking, on: capture.tracking == "TRACKING")
                 chip("FLOOR", on: capture.scan.floorY != nil)
                 chip("\(capture.scan.walls.count) WALLS", on: capture.scan.walls.count >= 2)
+                if capture.participants > 0 { chip("PAIRED \(capture.participants)", on: true) }
             }
         }
         .padding(20)
         .background(RoundedRectangle(cornerRadius: 24).fill(.black.opacity(0.78)))
         .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.white.opacity(0.14)))
+    }
+
+    private func action(_ text: String, filled: Bool) -> some View {
+        Text(text).mono(10, weight: .bold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .foregroundStyle(filled ? .black : .white)
+            .background(Capsule().fill(filled ? Color.white : Color.clear))
+            .overlay(Capsule().stroke(Color.white.opacity(0.3)))
     }
 
     private func chip(_ text: String, on: Bool) -> some View {
@@ -158,11 +225,15 @@ struct ContentView: View {
         }
         if a.aligned {
             if a.method == "origin" { return "You founded the map. Its origin is fixed here and saved; every scan aligns to it." }
+            if a.method == "paired" { return "Paired: your AR session merged with another phone's, so you share its map exactly." }
             if !relay.targetOutline.isEmpty { return "Scan this room until its walls fill the dashed outline from the floor plan." }
             if let match = a.match { return "Locked to the shared floor plan · \(Int(match * 100))% wall match." }
             return "Locked to the shared floor plan."
         }
         if a.ambiguous { return "These walls fit more than one spot. Scan a corner or doorway that makes this room unique." }
+        if relay.originFoundedBy != nil {
+            return "Looking for the saved map: scan walls it already has, or pair with a phone that's on it."
+        }
         return "Sweep the phone across at least two walls that meet at a corner."
     }
 
@@ -185,8 +256,14 @@ struct ContentView: View {
         capture.onPose = { pose in relay.send(pose: pose) }
         capture.onFrame = { pose, jpeg in relay.send(pose: pose, jpeg: jpeg) }
         capture.onScan = { scan in relay.send(scan: scan) }
-        capture.onCloud = { points in relay.send(cloud: points) }
+        capture.onCloud = { cloud in relay.send(cloud: cloud) }
         relay.onReset = { restart in capture.reset(restartTracking: restart) }
+        capture.onCollaboration = { data in relay.send(collaboration: data) }
+        relay.onCollaboration = { data in capture.receiveCollaboration(data) }
+        // Only an unplaced phone adopts another phone's map origin.
+        capture.onPeerMapOrigin = { alignment in
+            if !relay.alignment.aligned { relay.pair(alignment) }
+        }
         capture.start()
         reconnect()
     }
