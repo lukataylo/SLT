@@ -617,3 +617,25 @@ test('on an empty map, locating on the plan founds the map in the plan frame', (
   assert.deepEqual(align.alignment.t, [2, 1, 3]);
   assert.equal(align.alignment.yaw, 0.5);
 });
+
+test('ceilings are left out of the splat cloud, walls keep their full height', () => {
+  const room = new Room();
+  const a = new FakeSocket();
+  const id = room.join(a, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
+  room.handleText(id, planes(ROOM, 0));
+  room.handleText(id, JSON.stringify({
+    t: 'cloud',
+    // floor, wall high up (normal sideways), ceiling (normal down), unknown-normal point above 2.4 m
+    points: [1, 0, 1, 2, 2.6, 0.01, 3, 2.7, 3, 4, 2.6, 2],
+    colors: [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4],
+    normals: [0, 127, 0, 0, 0, 127, 0, -127, 0, 0, 0, 0],
+  }));
+  const kept = room.map.cloudRooms()[0].points;
+  assert.deepEqual(kept, [1, 0, 1, 2, 2.6, 0.01], 'floor and wall kept; ceiling and high unknown point dropped');
+
+  // Ceilings stored before the filter are cleaned out on load.
+  const map2 = new LiveMap(room.map.toFile());
+  map2.loadClouds([{ id: 'r1', points: [5, 2.8, 5, 6, 1, 6], colors: [9, 9, 9, 8, 8, 8], normals: [0, -127, 0, 127, 0, 0] }]);
+  assert.deepEqual(map2.cloudRooms()[0].points, [6, 1, 6]);
+});

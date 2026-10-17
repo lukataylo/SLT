@@ -9,6 +9,16 @@ const MAX_CLOUD_POINTS = 300000; // per room
 
 const round = (v, k = 1000) => Math.round(v * k) / k;
 
+// Ceilings clutter the splat and hide the rooms from above, so they're left
+// out: surfaces facing down above head height, or (for points stored before
+// normals were recorded) anything above a typical ceiling height.
+const CEILING_MIN_Y = 1.6; // metres above the floor
+const NO_NORMAL_CEILING_Y = 2.4;
+export function isCeiling(y, nx, ny, nz) {
+  if (nx === 0 && ny === 0 && nz === 0) return y > NO_NORMAL_CEILING_Y;
+  return y > CEILING_MIN_Y && ny < -0.6 * 127;
+}
+
 function emptyRoom({ id, name, origin, planRoomId = null, createdAt }) {
   return { id, name, origin, planRoomId, createdAt, base: [], openings: [], floor: [], cloud: new Map() };
 }
@@ -172,6 +182,7 @@ export class LiveMap {
       if (![x, y, z].every(Number.isFinite)) continue;
       const rgb = [0, 1, 2].map((k) => clampInt(colors[i + k], 0, 255, 150));
       const n = [0, 1, 2].map((k) => clampInt(normals[i + k], -127, 127, 0));
+      if (isCeiling(y, n[0], n[1], n[2])) continue;
       const key = `${Math.round(x / CLOUD_VOXEL)},${Math.round(y / CLOUD_VOXEL)},${Math.round(z / CLOUD_VOXEL)}`;
       const prev = room.cloud.get(key);
       if (prev) {
@@ -203,6 +214,7 @@ export class LiveMap {
       if (!room) continue;
       for (let i = 0; i + 2 < points.length; i += 3) {
         const p = [points[i], points[i + 1], points[i + 2], colors[i], colors[i + 1], colors[i + 2], normals[i], normals[i + 1], normals[i + 2]];
+        if (isCeiling(p[1], p[6], p[7], p[8])) continue; // clean out ceilings saved before this filter
         room.cloud.set(p.slice(0, 3).map((v) => Math.round(v / CLOUD_VOXEL)).join(','), p);
       }
     }
