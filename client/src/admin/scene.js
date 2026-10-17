@@ -21,6 +21,14 @@ const FRAME_GREEN = 0x7dd23a;
 const ORIGIN_RED = 0xd71921;
 const GROUND_Y = -0.55; // the scan sits on a "curtain" above the ground frame
 
+// Line and marker colours per look. TRUE COLOUR keeps the green/cyan
+// accents; DEPTH is a monochrome hologram (white and grey on black, a fine
+// floor grid), with red left as the one accent for origin and selection.
+const PALETTES = {
+  colour: { floor: 0x0f8a45, floorLine: 0x35e07a, door: TILE_GREEN, window: 0x5ef0ff, roomOrigin: 0x9dfcd0, plan: 0x2a9fb0, person: TILE_GREEN, grid: false },
+  depth: { floor: 0xb0b0b0, floorLine: 0xdedede, door: 0xffffff, window: 0x9a9a9a, roomOrigin: 0xbdbdbd, plan: 0x8a8a8a, person: 0xffffff, grid: true },
+};
+
 const gradientGlsl = DEPTH_STOPS.map(([, c]) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`);
 
 // Translucent wall panels coloured by world height.
@@ -74,6 +82,29 @@ function disposeTree(obj) {
     if (o.material) [].concat(o.material).forEach((m) => { m.map?.dispose(); m.dispose(); });
     if (o.isCSS2DObject) o.element.remove();
   });
+}
+
+// DEPTH's floor: a fine grid every 0.5 m around the scan, with a dot at
+// every metre crossing, like the hologram references.
+function floorGrid(box, pad = 2, step = 0.5) {
+  const x0 = Math.floor((box.min.x - pad) / step) * step;
+  const x1 = Math.ceil((box.max.x + pad) / step) * step;
+  const z0 = Math.floor((box.min.z - pad) / step) * step;
+  const z1 = Math.ceil((box.max.z + pad) / step) * step;
+  const y = 0.002;
+  const lines = [];
+  for (let x = x0; x <= x1 + 1e-6; x += step) lines.push(x, y, z0, x, y, z1);
+  for (let z = z0; z <= z1 + 1e-6; z += step) lines.push(x0, y, z, x1, y, z);
+  const grid = lineSegments(lines, null, 0.1);
+  const dots = [];
+  for (let x = Math.ceil(x0); x <= x1; x += 1) for (let z = Math.ceil(z0); z <= z1; z += 1) dots.push(x, y, z);
+  const points = new THREE.Points(
+    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(dots, 3)),
+    new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0.45, depthWrite: false }),
+  );
+  const g = new THREE.Group();
+  g.add(grid, points);
+  return g;
 }
 
 function label(text, cls) {
@@ -332,6 +363,8 @@ export class AdminScene {
 
   // --- Map: rooms, walls, openings, floors, origins ---
   setMap(map) {
+    this.lastMap = map;
+    const look = PALETTES[this.mode] ?? PALETTES.colour;
     disposeTree(this.mapGroup);
     this.mapGroup.clear();
     this.wallMats = [];
@@ -350,7 +383,7 @@ export class AdminScene {
         const shape = new THREE.Shape(room.floor.map(([x, z]) => new THREE.Vector2(x, -z)));
         const slab = new THREE.Mesh(
           new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2),
-          new THREE.MeshBasicMaterial({ color: 0x0f8a45, transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+          new THREE.MeshBasicMaterial({ color: look.floor, transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
         );
         slab.position.y = 0.005;
         this.mapGroup.add(slab);
@@ -361,7 +394,7 @@ export class AdminScene {
           grow(x, 0, z);
         });
         const ol = lineSegments(outline, null, 0.75);
-        ol.material.color.set(0x35e07a);
+        ol.material.color.set(look.floorLine);
         this.mapGroup.add(ol);
       }
 
@@ -401,12 +434,12 @@ export class AdminScene {
         const y1 = o.y1 ?? 2.1;
         const pts = [a1, y0, b1, a2, y0, b2, a2, y0, b2, a2, y1, b2, a2, y1, b2, a1, y1, b1, a1, y1, b1, a1, y0, b1];
         const obj = lineSegments(pts, null, 1);
-        obj.material.color.set(o.kind === 'door' ? TILE_GREEN : 0x5ef0ff);
+        obj.material.color.set(o.kind === 'door' ? look.door : look.window);
         this.mapGroup.add(obj);
       }
 
       if (room.origin) {
-        const c = cross(0x9dfcd0, 0.3, 0.35);
+        const c = cross(look.roomOrigin, 0.3, 0.35);
         c.position.set(room.origin[0], 0, room.origin[1]);
         this.mapGroup.add(c);
       }
@@ -442,7 +475,8 @@ export class AdminScene {
       this.mapGroup.add(obj);
     }
 
-    if (map.plan?.placement) this.addPlan(map.plan, grow);
+    if (map.plan?.placement) this.addPlan(map.plan, grow, look);
+    if (look.grid && !box.isEmpty()) this.mapGroup.add(floorGrid(box));
 
     if (map.origin) {
       const o = cross(ORIGIN_RED, 0.7, 1.2);
@@ -460,10 +494,13 @@ export class AdminScene {
   // TRUE COLOUR: the splats carry the room, so walls fade to faint edges.
   // DEPTH: the reference look, height-graded panels and glowing splats.
   setMode(mode) {
+    const changed = mode !== this.mode;
     this.mode = mode;
     this.cloud.setMode(mode);
     this.bloomSplats.enabled = mode === 'depth';
-    this.applyMode();
+    // Each look colours the map differently: rebuild it in the new one.
+    if (changed && this.lastMap) this.setMap(this.lastMap);
+    else this.applyMode();
   }
 
   setCutaway(on) {
@@ -481,7 +518,7 @@ export class AdminScene {
   // Architectural plan laid on the floor. Plan frame: x right, z down the
   // image, metres from its top-left; placed into the map like shared/planes.js
   // transformPoint2 (rotate by yaw about +Y, then translate).
-  addPlan(plan, grow) {
+  addPlan(plan, grow, look = PALETTES.colour) {
     const { yaw, t } = plan.placement;
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
@@ -513,7 +550,7 @@ export class AdminScene {
     }
     if (outline.length) {
       const ol = lineSegments(outline, null, 0.35);
-      ol.material.color.set(0x2a9fb0);
+      ol.material.color.set(look.plan);
       this.mapGroup.add(ol);
     }
   }
@@ -670,8 +707,9 @@ export class AdminScene {
       m.group.position.lerp(m.target, 0.2);
       m.cone.rotation.y = m.yaw;
       const sel = m.el.classList.contains('selected');
-      m.spot.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
-      m.cone.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
+      const person = (PALETTES[this.mode] ?? PALETTES.colour).person;
+      m.spot.material.color.set(sel ? ORIGIN_RED : person);
+      m.cone.material.color.set(sel ? ORIGIN_RED : person);
       m.spot.scale.setScalar(sel ? 1.35 : 1);
       m.spot.material.opacity = 0.85 * m.dim;
       m.cone.material.opacity = 0.22 * m.dim;

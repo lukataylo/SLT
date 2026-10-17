@@ -27,6 +27,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
      point with transform; the separate translate moves it to the right. */
   translate: calc(50% + 14px) 0; }
 .label.device.dim { opacity: 0.35; }
+/* DEPTH is monochrome: people's tags in white, rooms in grey. */
+body[data-mode='depth'] .label.device:not(.selected) { color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+body[data-mode='depth'] .label.room { color: #bdbdbd; border-color: rgba(255, 255, 255, 0.25); }
 .label.room { color: #9dfcd0; border: 1px solid rgba(157, 252, 208, 0.3); font-weight: 400; }
 .label.origin { color: #fff; background: var(--red); }
 
@@ -75,7 +78,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font: 400 9px var(--mono); letter-spacing: 0.14em; color: var(--muted); }
 #legend span { display: flex; align-items: center; gap: 6px; }
 .sw { display: inline-block; width: 18px; height: 6px; border-radius: 3px; }
-.sw.depth { width: 40px; background: linear-gradient(90deg, #0a6b32, #16b25c, #19c9a6, #27c6ea, #2f6dff); }
+.sw.depth { width: 40px; background: linear-gradient(90deg, #3a3a3a, #6a6a6a, #a6a6a6, #dadada, #ffffff); }
 .sw.door { background: var(--lime); }
 .sw.window { background: #5ef0ff; }
 .sw.origin { background: var(--red); }

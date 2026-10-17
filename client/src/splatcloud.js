@@ -14,14 +14,14 @@ const ROUND = 0.032; // when the normal is unknown
 const OPACITY = 0.92;
 const GREY = 150;
 
-// Height -> colour: deep green at the floor, through teal and cyan, to blue at
-// ceiling height (the depth gradient from the admin reference image).
+// Height -> colour for the DEPTH look: a monochrome hologram, dim grey at the
+// floor rising to white at ceiling height, so rooms read as glowing volumes.
 export const DEPTH_STOPS = [
-  [0.0, new THREE.Color(0x0a6b32)],
-  [0.35, new THREE.Color(0x16b25c)],
-  [1.1, new THREE.Color(0x19c9a6)],
-  [1.9, new THREE.Color(0x27c6ea)],
-  [2.8, new THREE.Color(0x2f6dff)],
+  [0.0, new THREE.Color(0x3a3a3a)],
+  [0.35, new THREE.Color(0x6a6a6a)],
+  [1.1, new THREE.Color(0xa6a6a6)],
+  [1.9, new THREE.Color(0xdadada)],
+  [2.8, new THREE.Color(0xffffff)],
 ];
 
 export function depthColor(y, out = new THREE.Color()) {
