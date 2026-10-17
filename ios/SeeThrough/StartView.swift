@@ -21,7 +21,10 @@ struct StartView: View {
                     IconButton(glyph: .gear, label: "Settings") { model.sheet = .settings }
                 }
                 Spacer()
-                Text("SEE\nTHROUGH").font(Theme.display(58)).lineSpacing(-6)
+                // Smaller while typing, and never truncated: the keyboard takes half the screen.
+                Text("SEE\nTHROUGH").font(Theme.display(nameFocused ? 34 : 58)).lineSpacing(-6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .animation(.snappy, value: nameFocused)
                 Text("What's your name?").label(10).foregroundStyle(Theme.muted)
                 TextField("", text: $name, prompt: Text("Your name").foregroundStyle(Theme.muted))
                     .font(Theme.display(30))

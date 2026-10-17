@@ -26,10 +26,9 @@ struct SettingsView: View {
                     Text("Others see this next to your view.").font(.footnote).foregroundStyle(Theme.muted)
                 }
 
-                section("See through") {
-                    grid {
-                        tile(.camera, "Share my view", $settings.shareCamera)
-                    }
+                section("Live") {
+                    // A single toggle: full width rather than half a row.
+                    tile(.camera, "Share my view", $settings.shareCamera)
                 }
                 section("Scanning") {
                     grid {
@@ -46,7 +45,7 @@ struct SettingsView: View {
                             row("Server", relay.connected ? "Connected" : "Offline")
                             row("Rooms", "\(relay.rooms.count)")
                             row("Origin", relay.originFoundedBy.map { "Set by \($0)" } ?? "Not set")
-                            row("This phone", relay.alignment.aligned ? "Located" : "Not located")
+                            row("This phone", relay.alignment.aligned ? "Placed" : "Not placed")
                         }
                     }
                     Button { withAnimation { showAdvanced.toggle() } } label: {
