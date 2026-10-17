@@ -66,6 +66,7 @@ async function start({ name, mode, share }) {
     }
   });
   // Once LiDAR phones have vectorised real walls, they replace the blockout.
+  let hasLiveMap = false;
   const applyLiveMap = ({ walls }) => {
     if (!walls?.length) return;
     const xs = walls.flatMap((w) => [w[0], w[2]]);
@@ -73,6 +74,9 @@ async function start({ name, mode, share }) {
     const bounds = [Math.min(...xs) - 1, Math.min(...zs) - 1, Math.max(...xs) + 1, Math.max(...zs) + 1];
     world.setWalls(walls);
     world.setFloor(bounds);
+    // The blockout's start point means nothing in a scanned map's frame.
+    if (!hasLiveMap && pose.kind === 'sim') pose.setPosition((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2);
+    hasLiveMap = true;
     minimap.setWalls(walls);
     minimap.setBounds(bounds);
   };

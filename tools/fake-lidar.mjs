@@ -3,7 +3,7 @@
 // frame, and reports the walls it has "seen" so far, like ARKit plane anchors.
 //
 //   node tools/fake-lidar.mjs --server http://localhost:8787 --name Phone1 --yaw 0 --tx 0 --tz 0
-//   node tools/fake-lidar.mjs --name Phone2 --yaw 1.2 --tx 3 --tz -2 --start 3
+//   node tools/fake-lidar.mjs --name Phone2 --yaw=1.2 --tx=3 --tz=-2 --start=3
 import { parseArgs } from 'node:util';
 import { WebSocket } from 'ws';
 import { transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
