@@ -83,28 +83,6 @@ function label(text, cls) {
   return new CSS2DObject(el);
 }
 
-// Grid texture for the floating device tiles.
-function tileTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(200,255,58,0.18)';
-  ctx.fillRect(0, 0, 128, 128);
-  ctx.strokeStyle = 'rgba(220,255,120,0.9)';
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i <= 8; i++) {
-    const v = 4 + i * 15;
-    ctx.beginPath(); ctx.moveTo(v, 4); ctx.lineTo(v, 124); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(4, v); ctx.lineTo(124, v); ctx.stroke();
-  }
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = 'rgba(230,255,140,1)';
-  ctx.strokeRect(3, 3, 122, 122);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 // A flat-on-floor cross with a short post: room origins and the map origin.
 function cross(color, size, post) {
   const s = size;
@@ -235,7 +213,6 @@ export class AdminScene {
     this.wallMats = [];
     this.wallEdges = [];
     this.devices = new Map();
-    this.tileTex = tileTexture();
 
     this.box = this.buildBox();
     this.scene.add(this.box.group);
@@ -594,14 +571,10 @@ export class AdminScene {
     }
   }
 
+  // A person: a dot where they stand, a cone the way they face, and their
+  // name tag beside the dot.
   deviceMarker(d) {
     const group = new THREE.Group();
-    const tile = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.1, 1.1).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: this.tileTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
-    );
-    const beam = lineSegments([0, 0, 0, 0, 1, 0], null, 0.95);
-    beam.material.color.set(TILE_GREEN);
     const spot = new THREE.Mesh(
       new THREE.CircleGeometry(0.28, 24).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: TILE_GREEN, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }),
@@ -612,40 +585,16 @@ export class AdminScene {
       new THREE.MeshBasicMaterial({ color: TILE_GREEN, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
     );
     cone.position.y = 0.04;
-    // The device's latest camera frame, under the glowing grid frame.
-    const photoTex = new THREE.Texture();
-    photoTex.colorSpace = THREE.SRGBColorSpace;
-    photoTex.flipY = false; // bitmaps arrive pre-flipped
-    const photo = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 1.0).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: photoTex, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    photo.visible = false;
-    // The name tag sits beside the person's dot on the floor (admin.css
-    // shifts it to the right on screen), not up by the floating tile.
+    // admin.css shifts the tag to the right of the dot on screen.
     const lab = label(d.name.toUpperCase(), 'device');
     lab.position.y = 0.05;
     // People are always drawn on top: never hidden by walls or the scan.
-    for (const o of [photo, tile, beam, spot, cone]) {
+    for (const o of [spot, cone]) {
       o.material.depthTest = false;
       o.renderOrder = 10;
     }
-    group.add(photo, tile, beam, spot, cone, lab);
-    return { group, tile, photo, photoTex, beam, spot, cone, label: lab, el: lab.element, target: new THREE.Vector3(), yaw: 0, dim: 1, placed: false };
-  }
-
-  // Shows a device's camera frame (an ImageBitmap) on its beacon tile,
-  // centre-cropped to the square tile.
-  setDeviceFrame(id, bitmap) {
-    const m = this.devices.get(id);
-    if (!m) return bitmap.close?.();
-    m.photoTex.image?.close?.();
-    m.photoTex.image = bitmap;
-    const aspect = bitmap.width / bitmap.height;
-    m.photoTex.repeat.set(aspect > 1 ? 1 / aspect : 1, aspect > 1 ? 1 : aspect);
-    m.photoTex.offset.set((1 - m.photoTex.repeat.x) / 2, (1 - m.photoTex.repeat.y) / 2);
-    m.photoTex.needsUpdate = true;
-    m.photo.visible = true;
+    group.add(spot, cone, lab);
+    return { group, spot, cone, label: lab, el: lab.element, target: new THREE.Vector3(), yaw: 0, dim: 1, placed: false };
   }
 
   // The device selected in the operator view: red beacon and label.
@@ -713,27 +662,19 @@ export class AdminScene {
       r.scale.set(size.x + pad * 2, 1, size.z + pad * 2);
     }
 
-    const tileY = this.boxNow.max.y - 0.5;
     for (const m of this.devices.values()) {
       if (!m.placed) {
         m.group.position.copy(m.target);
         m.placed = true;
       }
       m.group.position.lerp(m.target, 0.2);
-      m.tile.position.y = tileY + Math.sin(now / 900 + m.target.x) * 0.06;
-      m.photo.position.y = m.tile.position.y - 0.01;
-      m.photo.material.opacity = 0.95 * m.dim;
-      m.beam.scale.y = m.tile.position.y;
       m.cone.rotation.y = m.yaw;
       const sel = m.el.classList.contains('selected');
       m.spot.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
       m.cone.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
-      m.beam.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
-      m.tile.scale.setScalar(sel ? 1.35 : 1);
-      m.photo.scale.setScalar(sel ? 1.35 : 1);
-      for (const o of [m.tile, m.beam, m.spot, m.cone]) {
-        o.material.opacity = (o === m.cone ? 0.22 : o === m.spot ? 0.85 : 0.95) * m.dim;
-      }
+      m.spot.scale.setScalar(sel ? 1.35 : 1);
+      m.spot.material.opacity = 0.85 * m.dim;
+      m.cone.material.opacity = 0.22 * m.dim;
     }
 
     if (this.focus) {
@@ -741,11 +682,7 @@ export class AdminScene {
       if (now > this.focus.until) this.focus = null;
     }
     this.controls.update();
-    // Photos must not bloom either: hide them while rendering the glow.
-    for (const m of this.devices.values()) m.photo.userData.shown = m.photo.visible;
-    for (const m of this.devices.values()) m.photo.visible = false;
     this.bloomComposer.render();
-    for (const m of this.devices.values()) m.photo.visible = m.photo.userData.shown;
     this.composer.render();
     this.labels.render(this.scene, this.camera);
   }

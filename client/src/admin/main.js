@@ -20,7 +20,6 @@ let view = 'operator';
 // Inside the operator view, the floor-plan panel shows the 2D plan or the 3D
 // splat scene (the same scene as the full 3D view, moved into the panel).
 let planMode = '2d';
-const sceneShowing = () => view === '3d' || planMode === '3d';
 
 const state = { map: null, devices: [], connected: false };
 const pad = (n, w = 2) => String(n).padStart(w, '0');
@@ -72,7 +71,6 @@ async function handleFrame(meta, jpeg) {
   try {
     const blob = new Blob([jpeg], { type: 'image/jpeg' });
     if (view === 'operator') operator.setFrame(meta, await createImageBitmap(blob));
-    if (sceneShowing()) scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
     const prev = thumbs.get(meta.id);
     if (prev) URL.revokeObjectURL(prev);
     const url = URL.createObjectURL(blob);
