@@ -1,5 +1,6 @@
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import * as THREE from 'three';
+import { SplatCloud } from './splatcloud.js';
 
 const CARD_DISTANCE = 2.5; // metres in front of a feed phone where its video is shown
 const STALE_MS = 3000;
@@ -15,6 +16,10 @@ export class World {
     this.scene.add(new SparkRenderer({ renderer: this.renderer }));
     this.walls = [];
     this.splat = null;
+    // The live LiDAR scan from the phones, as true-colour splats.
+    this.cloud = new SplatCloud({ mode: 'colour' });
+    this.cloud.onChange = () => this.setWallOpacity(this.wallOpacity);
+    this.scene.add(this.cloud.group);
     this.peers = new Map();
     this.xray = false;
     this.wallOpacity = 0.6;
@@ -78,13 +83,17 @@ export class World {
     });
   }
 
+  // The walls slider fades the captured space - the uploaded splat, the live
+  // LiDAR splats, or the blockout - to reveal the video cards behind it.
   setWallOpacity(v) {
     this.wallOpacity = v;
     if (this.splat) this.splat.opacity = v;
-    // Walls are mostly a faint fill with crisp edges, so the dot floor and
-    // video cards behind them stay readable.
-    if (this.wallMaterial) this.wallMaterial.opacity = (this.splat ? 0.05 : 0.14) * v;
-    if (this.edgeMaterial) this.edgeMaterial.opacity = 0.15 + 0.7 * v;
+    this.cloud.setOpacity(v);
+    // Once real surfaces exist the wall boxes are only faint outlines; before
+    // that they're a faint fill with crisp edges.
+    const scanned = !!this.splat || this.cloud.count > 0;
+    if (this.wallMaterial) this.wallMaterial.opacity = scanned ? 0 : 0.14 * v;
+    if (this.edgeMaterial) this.edgeMaterial.opacity = scanned ? 0.08 + 0.2 * v : 0.15 + 0.7 * v;
   }
 
   setXray(on) {

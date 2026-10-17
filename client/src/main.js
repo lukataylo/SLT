@@ -2,6 +2,7 @@ import { yawTowards } from './align.js';
 import { Camera } from './camera.js';
 import { Minimap } from './minimap3d.js';
 import { Net } from './net.js';
+import { fetchCloudSnapshot } from './splatcloud.js';
 import { MotionPose } from './pose/motion.js';
 import { SimPose } from './pose/sim.js';
 import { World } from './scene.js';
@@ -84,8 +85,17 @@ async function start({ name, mode, share }) {
   };
   net.addEventListener('map', ({ detail }) => applyLiveMap(detail));
 
+  // Live LiDAR splats: a snapshot on (re)connect, then deltas as phones scan.
+  net.addEventListener('cloud', ({ detail: c }) => {
+    if (Array.isArray(c.points) && c.points.length) world.cloud.append(c.roomId ?? '_', c.points, c.colors, c.normals);
+  });
+  net.addEventListener('cloud-reset', ({ detail }) => world.cloud.reset(detail.roomId ?? null));
+
   net.addEventListener('welcome', ({ detail }) => {
     applyLiveMap(detail.map ?? {});
+    fetchCloudSnapshot()
+      .then((buf) => world.cloud.load(buf))
+      .catch((err) => console.warn(err.message));
     for (const p of detail.peers) {
       peers.set(p.id, { name: p.name, pose: p.pose });
       const card = world.peer(p.id, p.name);

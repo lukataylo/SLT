@@ -27,6 +27,11 @@
         <div><b id="statPoints">0</b><span>POINTS</span></div>
         <div><b id="statDevices">00</b><span>ONLINE</span></div>
       </div>
+      <div class="modes" role="group" aria-label="Cloud colours">
+        <button data-mode="colour" aria-pressed="true">TRUE COLOUR</button>
+        <button data-mode="depth" aria-pressed="false">DEPTH</button>
+        <button id="cutaway" aria-pressed="false" title="Hide everything above 1.4 m to look into the rooms">CUTAWAY</button>
+      </div>
       <div class="live"><span id="conn" class="dot"></span><span id="connLabel">OFFLINE</span></div>
     </header>
 
@@ -47,7 +52,8 @@
     </aside>
 
     <footer id="legend">
-      <span><i class="sw depth"></i>DEPTH 0–2.6M</span>
+      <span class="depth-only"><i class="sw depth"></i>DEPTH 0–2.6M</span>
+      <span class="colour-only"><i class="sw splat"></i>LIDAR SPLATS · TRUE COLOUR</span>
       <span><i class="sw door"></i>DOOR</span>
       <span><i class="sw window"></i>WINDOW</span>
       <span><i class="sw origin"></i>ORIGIN</span>

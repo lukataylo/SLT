@@ -94,3 +94,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   #legend { display: none; }
   .label { font-size: 8px; padding: 2px 5px; }
 }
+
+/* Cloud colour mode toggle */
+.modes { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: #0a0a0a; }
+.modes button { border: 0; background: transparent; color: var(--muted); padding: 7px 12px; border-radius: 999px;
+  font: 700 10px var(--mono); letter-spacing: 0.12em; cursor: pointer; }
+.modes button[aria-pressed='true'] { background: #f5f5f5; color: #000; }
+#cutaway { margin-left: 4px; border: 1px solid var(--line); }
+#cutaway[aria-pressed='true'] { background: var(--lime); color: #000; border-color: var(--lime); }
+body[data-mode='colour'] .depth-only, body[data-mode='depth'] .colour-only { display: none !important; }
+.sw.splat { width: 40px; background: linear-gradient(90deg, #8a6a4a, #c9b79c, #6f8f7a, #b5523b, #e9e4da); }
+
+/* Device camera thumbnails */
+.device-row { grid-template-columns: auto auto 1fr auto; }
+.device-row .meta { grid-column: 3 / -1; }
+.thumb { width: 44px; height: 33px; object-fit: cover; border-radius: 6px; border: 1px solid var(--lime); grid-row: span 2; }
+.thumb[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .modes { order: 2; }
+  .modes button { padding: 6px 9px; }
+}

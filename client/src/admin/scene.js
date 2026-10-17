@@ -1,10 +1,15 @@
+import { SparkRenderer } from '@sparkjsdev/spark';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { DEPTH_STOPS, depthColor, SplatCloud } from '../splatcloud.js';
+
+export { depthColor };
 
 const WALL_HEIGHT = 2.6;
 const BOX_CYAN = 0x2fd6e6;
@@ -13,34 +18,12 @@ const FRAME_GREEN = 0x7dd23a;
 const ORIGIN_RED = 0xd71921;
 const GROUND_Y = -0.55; // the scan sits on a "curtain" above the ground frame
 
-// Height -> colour, the depth gradient from the reference: deep green at the
-// floor, through teal and cyan, to blue at ceiling height.
-const DEPTH_STOPS = [
-  [0.0, new THREE.Color(0x0a6b32)],
-  [0.35, new THREE.Color(0x16b25c)],
-  [1.1, new THREE.Color(0x19c9a6)],
-  [1.9, new THREE.Color(0x27c6ea)],
-  [2.8, new THREE.Color(0x2f6dff)],
-];
-
-export function depthColor(y, out = new THREE.Color()) {
-  if (y <= DEPTH_STOPS[0][0]) return out.copy(DEPTH_STOPS[0][1]);
-  for (let i = 1; i < DEPTH_STOPS.length; i++) {
-    const [y1, c1] = DEPTH_STOPS[i];
-    if (y <= y1) {
-      const [y0, c0] = DEPTH_STOPS[i - 1];
-      return out.copy(c0).lerp(c1, (y - y0) / (y1 - y0));
-    }
-  }
-  return out.copy(DEPTH_STOPS.at(-1)[1]);
-}
-
 const gradientGlsl = DEPTH_STOPS.map(([, c]) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`);
 
 // Translucent wall panels coloured by world height.
 function wallMaterial(brightness) {
   return new THREE.ShaderMaterial({
-    uniforms: { uBright: { value: brightness } },
+    uniforms: { uBright: { value: brightness }, uAlpha: { value: 1 } },
     vertexShader: /* glsl */ `
       varying float vY;
       void main() {
@@ -50,6 +33,7 @@ function wallMaterial(brightness) {
       }`,
     fragmentShader: /* glsl */ `
       uniform float uBright;
+      uniform float uAlpha;
       varying float vY;
       vec3 depth(float y) {
         if (y < 0.35) return mix(${gradientGlsl[0]}, ${gradientGlsl[1]}, clamp(y / 0.35, 0.0, 1.0));
@@ -59,7 +43,7 @@ function wallMaterial(brightness) {
       }
       void main() {
         float fade = 0.55 + 0.45 * (1.0 - clamp(vY / ${WALL_HEIGHT.toFixed(1)}, 0.0, 1.0));
-        gl_FragColor = vec4(depth(vY) * uBright, 0.11 * fade * uBright);
+        gl_FragColor = vec4(depth(vY) * uBright, 0.11 * fade * uBright * uAlpha);
       }`,
     transparent: true,
     depthWrite: false,
@@ -202,17 +186,50 @@ export class AdminScene {
       idle = setTimeout(() => (this.controls.autoRotate = true), 6000);
     });
 
+    // The scan is Gaussian splats in a scene of their own, so they can be kept
+    // out of the bloom: only the wireframe, frames and beacons glow, and the
+    // splats keep their true camera colours. Both scenes share one depth
+    // buffer in the final pass, so walls and splats occlude each other.
+    this.splatScene = new THREE.Scene();
+    this.splatScene.add(new SparkRenderer({ renderer: this.renderer }));
+    this.cloud = new SplatCloud({ mode: 'colour' });
+    this.splatScene.add(this.cloud.group);
+    this.mode = 'colour';
+
+    this.bloomComposer = new EffectComposer(this.renderer);
+    this.bloomComposer.renderToScreen = false;
+    this.bloomComposer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloomSplats = new RenderPass(this.splatScene, this.camera);
+    this.bloomSplats.clear = false;
+    this.bloomSplats.enabled = false; // depth mode only: glowing like the reference
+    this.bloomComposer.addPass(this.bloomSplats);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.42);
+    this.bloomComposer.addPass(this.bloom);
+
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.4, 0.42);
-    this.composer.addPass(this.bloom);
+    const splatPass = new RenderPass(this.splatScene, this.camera);
+    splatPass.clear = false;
+    this.composer.addPass(splatPass);
+    const mix = new ShaderPass(
+      new THREE.ShaderMaterial({
+        uniforms: { baseTexture: { value: null }, bloomTexture: { value: this.bloomComposer.renderTarget2.texture } },
+        vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader:
+          'uniform sampler2D baseTexture; uniform sampler2D bloomTexture; varying vec2 vUv;' +
+          'void main() { gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv); }',
+      }),
+      'baseTexture',
+    );
+    mix.needsSwap = true;
+    this.composer.addPass(mix);
     this.composer.addPass(new OutputPass());
 
     this.mapGroup = new THREE.Group();
-    this.cloudGroup = new THREE.Group();
     this.deviceGroup = new THREE.Group();
-    this.scene.add(this.mapGroup, this.cloudGroup, this.deviceGroup);
-    this.clouds = new Map();
+    this.scene.add(this.mapGroup, this.deviceGroup);
+    this.wallMats = [];
+    this.wallEdges = [];
     this.devices = new Map();
     this.tileTex = tileTexture();
 
@@ -234,7 +251,8 @@ export class AdminScene {
     const h = this.container.clientHeight;
     this.renderer.setSize(w, h);
     this.labels.setSize(w, h);
-    this.composer.setSize(w, h); // sizes the bloom pass in device pixels too
+    this.composer.setSize(w, h);
+    this.bloomComposer.setSize(w, h); // sizes the bloom pass in device pixels too
     this.camera.aspect = w / h;
     // Centre the scene in the space the panels leave free: above the bottom
     // sheet on phones, left of the side column on wider screens.
@@ -311,6 +329,8 @@ export class AdminScene {
   setMap(map) {
     disposeTree(this.mapGroup);
     this.mapGroup.clear();
+    this.wallMats = [];
+    this.wallEdges = [];
     const box = new THREE.Box3();
     const grow = (x, y, z) => box.expandByPoint(new THREE.Vector3(x, y, z));
     const rooms = map.rooms?.length
@@ -355,6 +375,7 @@ export class AdminScene {
         const [x1, z1] = seg;
         const { panels, ux, uz } = wallPanels(seg, openings);
         const mat = wallMaterial(bright);
+        this.wallMats.push(mat);
         const edge = [];
         const edgeCol = [];
         const push = (t, y) => {
@@ -370,7 +391,9 @@ export class AdminScene {
           push(a, y0); push(b, y0); push(a, y1); push(b, y1);
           push(a, y0); push(a, y1); push(b, y0); push(b, y1);
         }
-        this.mapGroup.add(lineSegments(edge, edgeCol, 1));
+        const edges = lineSegments(edge, edgeCol, 1);
+        this.wallEdges.push(edges);
+        this.mapGroup.add(edges);
         grow(seg[0], WALL_HEIGHT, seg[1]);
         grow(seg[2], 0, seg[3]);
       });
@@ -413,7 +436,28 @@ export class AdminScene {
       grow(0, 0, 0);
     }
     this.mapBox = box.isEmpty() ? null : box;
+    this.applyMode();
     this.refit();
+  }
+
+  // TRUE COLOUR: the splats carry the room, so walls fade to faint edges.
+  // DEPTH: the reference look, height-graded panels and glowing splats.
+  setMode(mode) {
+    this.mode = mode;
+    this.cloud.setMode(mode);
+    this.bloomSplats.enabled = mode === 'depth';
+    this.applyMode();
+  }
+
+  setCutaway(on) {
+    this.cutaway = on;
+    this.cloud.setCutaway(on ? 1.4 : null);
+  }
+
+  applyMode() {
+    const colour = this.mode === 'colour' && this.cloud.count > 0;
+    for (const m of this.wallMats) m.uniforms.uAlpha.value = colour ? 0.15 : 1;
+    for (const e of this.wallEdges) e.material.opacity = colour ? 0.3 : 1;
   }
 
   // Architectural plan laid on the floor. Plan frame: x right, z down the
@@ -456,75 +500,29 @@ export class AdminScene {
     }
   }
 
-  // --- LiDAR point clouds, one growing buffer per room ---
-  cloud(roomId) {
-    let c = this.clouds.get(roomId);
-    if (!c) {
-      const cap = 4096;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cap * 3), 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cap * 3), 3));
-      geo.setDrawRange(0, 0);
-      const pts = new THREE.Points(
-        geo,
-        new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending }),
-      );
-      pts.frustumCulled = false;
-      this.cloudGroup.add(pts);
-      c = { pts, count: 0, cap, box: new THREE.Box3() };
-      this.clouds.set(roomId, c);
-    }
-    return c;
+  // --- LiDAR splat cloud ---
+  loadCloud(buffer) {
+    this.cloud.load(buffer);
+    this.cloudChanged();
   }
 
-  addCloud(roomId, flat) {
-    const c = this.cloud(roomId);
-    const n = Math.floor(flat.length / 3);
-    if (c.count + n > c.cap) {
-      let cap = c.cap;
-      while (c.count + n > cap) cap *= 2;
-      const geo = c.pts.geometry;
-      const pos = new Float32Array(cap * 3);
-      const col = new Float32Array(cap * 3);
-      pos.set(geo.attributes.position.array.subarray(0, c.count * 3));
-      col.set(geo.attributes.color.array.subarray(0, c.count * 3));
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      c.cap = cap;
-    }
-    const pos = c.pts.geometry.attributes.position;
-    const col = c.pts.geometry.attributes.color;
-    const tmp = new THREE.Color();
-    const v = new THREE.Vector3();
-    for (let i = 0; i < n; i++) {
-      const x = flat[i * 3], y = flat[i * 3 + 1], z = flat[i * 3 + 2];
-      pos.setXYZ(c.count + i, x, y, z);
-      depthColor(y, tmp);
-      col.setXYZ(c.count + i, tmp.r, tmp.g, tmp.b);
-      c.box.expandByPoint(v.set(x, y, z));
-    }
-    pos.needsUpdate = true;
-    col.needsUpdate = true;
-    c.count += n;
-    c.pts.geometry.setDrawRange(0, c.count);
-    this.refit();
+  addCloud(roomId, points, colors, normals) {
+    this.cloud.append(roomId, points, colors, normals);
+    this.cloudChanged();
   }
 
   resetCloud(roomId) {
-    for (const [id, c] of this.clouds) {
-      if (roomId != null && id !== roomId) continue;
-      this.cloudGroup.remove(c.pts);
-      c.pts.geometry.dispose();
-      c.pts.material.dispose();
-      this.clouds.delete(id);
-    }
+    this.cloud.reset(roomId);
+    this.cloudChanged();
+  }
+
+  cloudChanged() {
+    this.applyMode();
     this.refit();
   }
 
   get cloudPoints() {
-    let n = 0;
-    for (const c of this.clouds.values()) n += c.count;
-    return n;
+    return this.cloud.count;
   }
 
   // --- Devices: floating grid tiles with a beam to their floor spot ---
@@ -572,9 +570,32 @@ export class AdminScene {
       new THREE.MeshBasicMaterial({ color: TILE_GREEN, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
     );
     cone.position.y = 0.04;
+    // The device's latest camera frame, under the glowing grid frame.
+    const photoTex = new THREE.Texture();
+    photoTex.colorSpace = THREE.SRGBColorSpace;
+    photoTex.flipY = false; // bitmaps arrive pre-flipped
+    const photo = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.0, 1.0).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: photoTex, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    photo.visible = false;
     const lab = label(d.name.toUpperCase(), 'device');
-    group.add(tile, beam, spot, cone, lab);
-    return { group, tile, beam, spot, cone, label: lab, el: lab.element, target: new THREE.Vector3(), yaw: 0, dim: 1, placed: false };
+    group.add(photo, tile, beam, spot, cone, lab);
+    return { group, tile, photo, photoTex, beam, spot, cone, label: lab, el: lab.element, target: new THREE.Vector3(), yaw: 0, dim: 1, placed: false };
+  }
+
+  // Shows a device's camera frame (an ImageBitmap) on its beacon tile,
+  // centre-cropped to the square tile.
+  setDeviceFrame(id, bitmap) {
+    const m = this.devices.get(id);
+    if (!m) return bitmap.close?.();
+    m.photoTex.image?.close?.();
+    m.photoTex.image = bitmap;
+    const aspect = bitmap.width / bitmap.height;
+    m.photoTex.repeat.set(aspect > 1 ? 1 / aspect : 1, aspect > 1 ? 1 : aspect);
+    m.photoTex.offset.set((1 - m.photoTex.repeat.x) / 2, (1 - m.photoTex.repeat.y) / 2);
+    m.photoTex.needsUpdate = true;
+    m.photo.visible = true;
   }
 
   focusOn(id) {
@@ -589,7 +610,7 @@ export class AdminScene {
   refit() {
     const b = new THREE.Box3();
     if (this.mapBox) b.union(this.mapBox);
-    for (const c of this.clouds.values()) if (!c.box.isEmpty()) b.union(c.box);
+    if (!this.cloud.box.isEmpty()) b.union(this.cloud.box);
     for (const m of this.devices.values()) b.expandByPoint(m.target);
     if (b.isEmpty()) return;
     b.min.y = 0;
@@ -644,6 +665,8 @@ export class AdminScene {
       }
       m.group.position.lerp(m.target, 0.2);
       m.tile.position.y = tileY + Math.sin(now / 900 + m.target.x) * 0.06;
+      m.photo.position.y = m.tile.position.y - 0.01;
+      m.photo.material.opacity = 0.95 * m.dim;
       m.beam.scale.y = m.tile.position.y;
       m.cone.rotation.y = m.yaw;
       m.label.position.y = tileY + 0.45;
@@ -657,6 +680,11 @@ export class AdminScene {
       if (now > this.focus.until) this.focus = null;
     }
     this.controls.update();
+    // Photos must not bloom either: hide them while rendering the glow.
+    for (const m of this.devices.values()) m.photo.userData.shown = m.photo.visible;
+    for (const m of this.devices.values()) m.photo.visible = false;
+    this.bloomComposer.render();
+    for (const m of this.devices.values()) m.photo.visible = m.photo.userData.shown;
     this.composer.render();
     this.labels.render(this.scene, this.camera);
   }

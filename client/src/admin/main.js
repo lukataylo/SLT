@@ -1,12 +1,15 @@
+import { decodeFrame } from '../../../shared/protocol.js';
+import { fetchCloudSnapshot } from '../splatcloud.js';
 import { startMock } from './mock.js';
 import { AdminScene } from './scene.js';
 
-// Server -> admin contract (JSON text over /ws?role=admin):
-//   {t:'admin', map, devices, clouds:{[roomId]: [x,y,z,...]}}   once on connect
-//   {t:'map', ...map}                                            map changed
-//   {t:'devices', devices}                                       ~5 Hz
-//   {t:'cloud', roomId, points:[x,y,z,...]}                      append points
-//   {t:'cloud-reset', roomId}                                    null = all rooms
+// Server -> admin contract (over /ws?role=admin):
+//   {t:'admin', map, devices}                         once on connect; then GET /api/cloud
+//   {t:'map', ...map}                                 map changed
+//   {t:'devices', devices}                            ~5 Hz
+//   {t:'cloud', roomId, points, colors, normals}      append splats (xyz m, rgb 0-255, normal x127)
+//   {t:'cloud-reset', roomId}                         null = all rooms
+//   binary video frames (shared/protocol.js)          <= 2 fps per device
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -18,10 +21,19 @@ const pad = (n, w = 2) => String(n).padStart(w, '0');
 function handle(msg) {
   switch (msg?.t) {
     case 'admin':
-      scene.resetCloud(null);
       setMap(msg.map);
       setDevices(msg.devices ?? []);
-      for (const [roomId, points] of Object.entries(msg.clouds ?? {})) scene.addCloud(roomId, points);
+      if (msg.clouds) {
+        scene.resetCloud(null);
+        for (const [roomId, points] of Object.entries(msg.clouds)) scene.addCloud(roomId, points);
+      } else if (!params.has('mock')) {
+        fetchCloudSnapshot()
+          .then((buf) => {
+            scene.loadCloud(buf);
+            renderStats();
+          })
+          .catch((err) => console.warn(err.message));
+      }
       break;
     case 'map': {
       const { t, ...map } = msg;
@@ -32,7 +44,7 @@ function handle(msg) {
       setDevices(msg.devices ?? []);
       break;
     case 'cloud':
-      if (Array.isArray(msg.points) && msg.points.length) scene.addCloud(msg.roomId ?? '_', msg.points);
+      if (Array.isArray(msg.points) && msg.points.length) scene.addCloud(msg.roomId ?? '_', msg.points, msg.colors, msg.normals);
       break;
     case 'cloud-reset':
       scene.resetCloud(msg.roomId ?? null);
@@ -41,6 +53,28 @@ function handle(msg) {
       break;
   }
   renderStats();
+}
+
+// Latest camera frame per device: texture on its beacon and a list thumbnail.
+const thumbs = new Map();
+const decoding = new Set();
+async function handleFrame(meta, jpeg) {
+  if (!meta?.id || decoding.has(meta.id)) return;
+  decoding.add(meta.id);
+  try {
+    const blob = new Blob([jpeg], { type: 'image/jpeg' });
+    scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
+    const prev = thumbs.get(meta.id);
+    if (prev) URL.revokeObjectURL(prev);
+    const url = URL.createObjectURL(blob);
+    thumbs.set(meta.id, url);
+    const img = document.querySelector(`.device-row[data-id="${CSS.escape(meta.id)}"] img.thumb`);
+    if (img) img.src = url;
+  } catch (err) {
+    console.warn('frame:', err.message);
+  } finally {
+    decoding.delete(meta.id);
+  }
 }
 
 function setMap(map) {
@@ -71,10 +105,13 @@ function renderDevices() {
     const status = d.kind === 'lidar' ? (d.aligned ? 'ALIGNED' : 'SEARCHING') : 'WEB';
     li.innerHTML = `
       <span class="dot ${(d.online ?? d.live) ? 'on' : ''}"></span>
+      <img class="thumb" alt="" ${thumbs.has(d.id) ? `src="${thumbs.get(d.id)}"` : 'hidden'} />
       <span class="name"></span>
       <span class="chip ${d.kind}">${d.kind === 'lidar' ? 'LIDAR' : 'WEB'}</span>
       <span class="meta">${status} · ${roomName(d.roomId)}</span>`;
     li.querySelector('.name').textContent = d.name;
+    const img = li.querySelector('img.thumb');
+    img.addEventListener('load', () => (img.hidden = false));
     li.classList.toggle('dim', !(d.online ?? d.live) || (d.kind === 'lidar' && !d.aligned));
     return li;
   });
@@ -119,6 +156,26 @@ $('devices').addEventListener('keydown', (e) => {
   const row = e.target.closest('.device-row');
   if (row && (e.key === 'Enter' || e.key === ' ')) scene.focusOn(row.dataset.id);
 });
+function setMode(mode) {
+  scene.setMode(mode);
+  document.body.dataset.mode = mode;
+  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  try {
+    localStorage.setItem('slt.admin.mode', mode);
+  } catch {}
+}
+for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
+$('cutaway').addEventListener('click', () => {
+  const on = $('cutaway').getAttribute('aria-pressed') !== 'true';
+  $('cutaway').setAttribute('aria-pressed', String(on));
+  scene.setCutaway(on);
+});
+let savedMode = 'colour';
+try {
+  savedMode = localStorage.getItem('slt.admin.mode') ?? 'colour';
+} catch {}
+setMode(savedMode === 'depth' ? 'depth' : 'colour');
+
 for (const tab of document.querySelectorAll('[data-tab]')) {
   tab.addEventListener('click', () => {
     document.body.dataset.tab = tab.dataset.tab;
@@ -136,20 +193,25 @@ function setConnected(on, label) {
 
 if (params.has('mock')) {
   setConnected(true, 'MOCK');
-  startMock(handle);
+  startMock(handle, handleFrame);
 } else {
   let retry = 1000;
   const connect = () => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const token = params.get('token');
     const ws = new WebSocket(`${proto}://${location.host}/ws?role=admin${token ? `&token=${encodeURIComponent(token)}` : ''}`);
+    ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       retry = 1000;
       setConnected(true, 'LIVE');
     };
     ws.onmessage = (e) => {
-      if (typeof e.data !== 'string') return;
       try {
+        if (typeof e.data !== 'string') {
+          const { meta, jpeg } = decodeFrame(e.data);
+          handleFrame(meta, jpeg);
+          return;
+        }
         handle(JSON.parse(e.data));
       } catch (err) {
         console.warn('admin message:', err);
