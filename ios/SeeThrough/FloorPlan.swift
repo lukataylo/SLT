@@ -42,6 +42,9 @@ struct FloorTransform: Equatable {
 struct FloorPlanView: View {
     var walls: [[Float]]
     var seen: [Int] = []
+    var openings: [Opening] = []
+    var floor: [SIMD2<Float>] = []
+    var target: [WallSegment] = []
     var me: Mark?
     var peers: [Mark]
     var origin: FloorPlanScene.Origin?
@@ -52,10 +55,10 @@ struct FloorPlanView: View {
             HStack {
                 Text(title).font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
                 Spacer()
-                Text("\(walls.count) WALLS").font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
+                Text("\(walls.count) WALLS · \(openings.filter { $0.kind == "door" }.count) DOORS · \(openings.filter { $0.kind == "window" }.count) WIN").font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
             }
             ZStack {
-                FloorPlanScene(walls: walls, seen: seen, me: me, peers: peers, origin: origin)
+                FloorPlanScene(walls: walls, seen: seen, openings: openings, floor: floor, target: target, me: me, peers: peers, origin: origin)
                 if walls.isEmpty {
                     Text("SWEEP ACROSS A WALL").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.gray)
                 }

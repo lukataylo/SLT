@@ -33,6 +33,42 @@ Set `RECORD_DIR=/mnt/vast/slt` to archive every frame + pose.
 
 `npm test` runs the protocol, relay and alignment tests.
 
+## Pages
+
+| Page | What it's for |
+|---|---|
+| `/` | Phone/web app: live video through walls, 3D minimap |
+| `/admin.html` | Bird's-eye 3D view of every device, room, LiDAR point cloud and door/window (`?mock=1` for demo data) |
+| `/designer.html` | Upload a PDF/JPG floor plan, set its scale, draw and name rooms, place it on the scanned map |
+
+Set `ADMIN_TOKEN` to require `?token=…` on the admin view and for plan uploads.
+
+## iOS LiDAR app (`ios/`)
+
+ARKit world tracking + LiDAR on iPhone Pro. The phone:
+
+- **grounds first**: nothing is mapped until it has found the floor, which becomes y = 0;
+- merges the plane fragments ARKit reports for one wall into a single wall;
+- finds doors and windows from ARKit's per-face mesh classification (and
+  door/window planes) and snaps them onto their wall;
+- streams poses, frames, walls/openings/floor outline, and a 10 cm voxel
+  LiDAR point cloud (new voxels only) in its own ARKit frame.
+
+The server aligns each phone by matching its walls to the shared map.
+
+**Rooms.** The first scan founds the fixed map origin and Room 1. "Start new
+room here" creates a room whose origin is where you stand; optionally link it
+to a room drawn on the uploaded floor plan, whose outline then shows as a
+dashed target. Rooms can be switched or reset; "Reset entire map" clears every
+room and the origin for everyone.
+
+**Floor plans.** Upload in `/designer.html`. Once enough walls are scanned
+the server places the plan automatically by matching scanned walls into the
+plan's room outlines (or place it by hand in the designer).
+
+Build: `cd ios && xcodegen generate`, open `SeeThrough.xcodeproj`, pick your
+team, run on the phone. `node tools/fake-lidar.mjs` simulates a LiDAR phone.
+
 ## Adding a real scan
 
 1. Capture the space (Scaniverse / Polycam / Luma, or nerfstudio `splatfacto`).

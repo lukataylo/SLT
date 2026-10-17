@@ -9,6 +9,10 @@ struct FloorPlanScene: UIViewRepresentable {
 
     var walls: [[Float]]
     var seen: [Int]
+    var openings: [Opening] = []
+    var floor: [SIMD2<Float>] = []
+    /// Outline of the linked floor-plan room: what this room should become.
+    var target: [WallSegment] = []
     var me: Mark?
     var peers: [Mark]
     var origin: Origin?
@@ -38,6 +42,8 @@ struct FloorPlanScene: UIViewRepresentable {
         private var peerNodes: [SCNNode] = []
         private var lastWalls: [[Float]]?
         private var lastSeen: [Int] = []
+        private var lastExtras: ([Opening], [SIMD2<Float>], [WallSegment])?
+        private let extrasNode = SCNNode()
         private var lastOrigin: Origin??
 
         static let red = UIColor(red: 0.843, green: 0.098, blue: 0.129, alpha: 1)
@@ -51,6 +57,7 @@ struct FloorPlanScene: UIViewRepresentable {
             scene.rootNode.addChildNode(camera)
             scene.rootNode.addChildNode(wallsNode)
             scene.rootNode.addChildNode(originNode)
+            scene.rootNode.addChildNode(extrasNode)
             scene.rootNode.addChildNode(meNode)
             frame(minX: -3, maxX: 3, minZ: -3, maxZ: 3)
         }
@@ -60,6 +67,10 @@ struct FloorPlanScene: UIViewRepresentable {
                 lastWalls = plan.walls
                 lastSeen = plan.seen
                 rebuildWalls(plan.walls, seen: plan.seen, include: plan.origin != nil)
+            }
+            if lastExtras.map({ $0.0 != plan.openings || $0.1 != plan.floor || $0.2 != plan.target }) ?? true {
+                lastExtras = (plan.openings, plan.floor, plan.target)
+                rebuildExtras(plan.openings, floor: plan.floor, target: plan.target)
             }
             if plan.origin != lastOrigin {
                 lastOrigin = plan.origin
@@ -113,6 +124,38 @@ struct FloorPlanScene: UIViewRepresentable {
             guard minX.isFinite else { return }
             wallsNode.addChildNode(Coordinator.dots(minX: minX - 1, maxX: maxX + 1, minZ: minZ - 1, maxZ: maxZ + 1))
             frame(minX: minX - 1, maxX: maxX + 1, minZ: minZ - 1, maxZ: maxZ + 1)
+        }
+
+        /// Floor outline as a faint slab, doors (red) and windows (white) as
+        /// frames in their walls, and the linked plan room as a dashed target.
+        private func rebuildExtras(_ openings: [Opening], floor: [SIMD2<Float>], target: [WallSegment]) {
+            extrasNode.childNodes.forEach { $0.removeFromParentNode() }
+            if floor.count >= 3 {
+                let pts = floor.map { SCNVector3($0.x, 0.005, $0.y) }
+                let indices: [Int32] = (1..<Int32(pts.count - 1)).flatMap { i -> [Int32] in [0, i, i + 1] }
+                let slab = SCNGeometry(sources: [SCNGeometrySource(vertices: pts)], elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
+                slab.materials = [Coordinator.material(UIColor.white.withAlphaComponent(0.07))]
+                extrasNode.addChildNode(SCNNode(geometry: slab))
+                extrasNode.addChildNode(Coordinator.lines(pts.indices.flatMap { [pts[$0], pts[($0 + 1) % pts.count]] }, color: UIColor.white.withAlphaComponent(0.35)))
+            }
+            for kind in ["door", "window"] {
+                let frames = openings.filter { $0.kind == kind }.flatMap { o -> [SCNVector3] in
+                    let a0 = SCNVector3(o.a.x, o.y0, o.a.y), b0 = SCNVector3(o.b.x, o.y0, o.b.y)
+                    let a1 = SCNVector3(o.a.x, o.y1, o.a.y), b1 = SCNVector3(o.b.x, o.y1, o.b.y)
+                    return [a0, b0, a1, b1, a0, a1, b0, b1]
+                }
+                if !frames.isEmpty { extrasNode.addChildNode(Coordinator.lines(frames, color: kind == "door" ? Coordinator.red : .white)) }
+            }
+            // Dashed target outline: short pieces every 0.4 m.
+            var dashes: [SCNVector3] = []
+            for w in target {
+                let n = max(1, Int(w.length / 0.4))
+                for i in 0..<n where i % 2 == 0 {
+                    let p0 = w.a + (w.b - w.a) * Float(i) / Float(n), p1 = w.a + (w.b - w.a) * Float(i + 1) / Float(n)
+                    dashes += [SCNVector3(p0.x, 0.02, p0.y), SCNVector3(p1.x, 0.02, p1.y)]
+                }
+            }
+            if !dashes.isEmpty { extrasNode.addChildNode(Coordinator.lines(dashes, color: Coordinator.red.withAlphaComponent(0.8))) }
         }
 
         /// Fixed map origin in red; before alignment, this session's own

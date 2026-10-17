@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { LiveMap } from './livemap.js';
+import { planApi } from './plans.js';
 import { Recorder } from './recorder.js';
 import { Room } from './room.js';
 
@@ -12,6 +13,10 @@ const PORT = Number(process.env.PORT ?? 8787);
 const STATIC_DIR = path.resolve(fileURLToPath(new URL('../dist', import.meta.url)));
 const recorder = process.env.RECORD_DIR ? new Recorder(process.env.RECORD_DIR) : null;
 const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE) });
+// Optional shared secret for the admin view and plan uploads.
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
+const PLAN_DIR = process.env.MAP_FILE ? path.join(path.dirname(process.env.MAP_FILE), 'plans') : path.resolve('data/plans');
+const handlePlan = planApi({ map: room.map, dir: PLAN_DIR, token: ADMIN_TOKEN, onChange: () => room.broadcastMap() });
 
 // The floor plan and its fixed origin survive restarts when MAP_FILE points at
 // a persistent volume. Only committed scan sessions are saved.
@@ -20,12 +25,11 @@ function loadMap(file) {
   let saved = {};
   try {
     saved = JSON.parse(readFileSync(file, 'utf8'));
-    console.log(`[map] loaded ${saved.walls?.length ?? 0} walls, origin ${saved.origin ? 'fixed' : 'unset'}`);
+    console.log(`[map] loaded ${saved.rooms?.length ?? 0} rooms, origin ${saved.origin ? 'fixed' : 'unset'}, plan ${saved.plan ? 'yes' : 'no'}`);
   } catch {}
   let timer = null;
   return new LiveMap({
-    base: saved.walls ?? [],
-    origin: saved.origin ?? null,
+    ...saved,
     onChange: (map) => {
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -62,6 +66,7 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
   '.woff2': 'font/woff2',
   '.jpg': 'image/jpeg',
+  '.mjs': 'text/javascript',
 };
 
 // Vite fingerprints everything under /assets, so those can be cached forever;
@@ -89,10 +94,11 @@ async function serveStatic(req, res) {
   }
 }
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
+  if (await handlePlan(req, res)) return;
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return void res.end(JSON.stringify({ peers: room.peers.size, walls: room.map.walls.length, ...room.stats }));
+    return void res.end(JSON.stringify({ peers: room.peers.size, admins: room.admins.size, rooms: room.map.rooms.length, walls: room.map.walls.length, ...room.stats }));
   }
   if (req.url === '/map.json') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
@@ -105,13 +111,18 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 2 * 1024 * 10
 
 wss.on('connection', (ws, req) => {
   const params = new URL(req.url, 'http://x').searchParams;
-  const id = room.join(ws, { name: params.get('name'), frame: params.get('frame') });
+  const role = params.get('role');
+  if (role === 'admin' && ADMIN_TOKEN && params.get('token') !== ADMIN_TOKEN) return void ws.close(4401, 'admin token required');
+  const id = room.join(ws, { name: params.get('name'), frame: params.get('frame'), role });
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
   ws.on('message', (data, isBinary) => (isBinary ? room.handleFrame(id, data) : room.handleText(id, data.toString())));
   ws.on('close', () => room.leave(id));
   console.log(`[room] ${id} joined (${room.peers.size} connected)`);
 });
+
+// Admin views follow every device at 5 Hz.
+setInterval(() => room.broadcastDevices(), 200).unref();
 
 // Tunnels and mobile networks silently drop idle sockets; ping to detect them.
 setInterval(() => {

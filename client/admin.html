@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <title>SLT Admin</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Doto:wght@600;800&family=Space+Grotesk:wght@400;500&family=Space+Mono:wght@400;700&display=swap"
+    />
+    <link rel="stylesheet" href="./src/admin/admin.css" />
+  </head>
+  <body data-tab="devices">
+    <div id="stage"></div>
+
+    <header id="top">
+      <div class="brand">
+        <span class="dot red"></span>
+        <h1>SLT<span>ADMIN</span></h1>
+      </div>
+      <div class="stats">
+        <div><b id="statWalls">00</b><span>WALLS</span></div>
+        <div><b id="statPoints">0</b><span>POINTS</span></div>
+        <div><b id="statDevices">00</b><span>ONLINE</span></div>
+      </div>
+      <div class="live"><span id="conn" class="dot"></span><span id="connLabel">OFFLINE</span></div>
+    </header>
+
+    <aside id="side">
+      <nav class="tabs">
+        <button data-tab="devices" aria-pressed="true">DEVICES <b id="deviceCount">00</b></button>
+        <button data-tab="rooms" aria-pressed="false">ROOMS <b id="roomCount">00</b></button>
+      </nav>
+      <section class="panel" id="devicesPanel">
+        <h2>DEVICES</h2>
+        <ul id="devices"></ul>
+      </section>
+      <section class="panel" id="roomsPanel">
+        <h2>ROOMS</h2>
+        <p id="origin" class="origin-line"></p>
+        <ul id="rooms"></ul>
+      </section>
+    </aside>
+
+    <footer id="legend">
+      <span><i class="sw depth"></i>DEPTH 0–2.6M</span>
+      <span><i class="sw door"></i>DOOR</span>
+      <span><i class="sw window"></i>WINDOW</span>
+      <span><i class="sw origin"></i>ORIGIN</span>
+    </footer>
+
+    <script type="module" src="./src/admin/main.js"></script>
+  </body>
+</html>

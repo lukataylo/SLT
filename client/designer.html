@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <title>Plan Designer</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Doto:wght@600;800&family=Space+Grotesk:wght@400;500&family=Space+Mono:wght@400;700&display=swap"
+    />
+    <link rel="stylesheet" href="./src/designer/designer.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand"><span class="dot red"></span><span>SLT · PLAN DESIGNER</span></div>
+      <ol class="steps" id="steps">
+        <li data-step="upload"><b>01</b><span>UPLOAD</span></li>
+        <li data-step="scale"><b>02</b><span>SCALE</span></li>
+        <li data-step="rooms"><b>03</b><span>ROOMS</span></li>
+        <li data-step="place"><b>04</b><span>PLACE</span></li>
+      </ol>
+      <div class="live"><span id="liveDot" class="dot"></span><span id="liveLabel">MAP OFFLINE</span></div>
+    </header>
+
+    <nav class="rail" id="rail" aria-label="Tools">
+      <button data-tool="upload" title="Upload a PDF, JPG or PNG (U)"><i>↥</i><span>UPLOAD</span></button>
+      <button data-tool="scale" title="Draw a line of known length (S)"><i>⟷</i><span>SCALE</span></button>
+      <button data-tool="room" title="Draw a room outline (N)"><i>▱</i><span>ROOM</span></button>
+      <button data-tool="select" title="Select and edit rooms (V)"><i>↖</i><span>SELECT</span></button>
+      <button data-tool="place" title="Place the plan on the scanned map (P)"><i>⌖</i><span>PLACE</span></button>
+      <div class="rail-spacer"></div>
+      <button id="fit" title="Fit plan to view (F)"><i>⤢</i><span>FIT</span></button>
+    </nav>
+
+    <main id="stage">
+      <svg id="svg" aria-label="Floor plan workspace">
+        <g id="world">
+          <image id="planImg" preserveAspectRatio="none" />
+          <g id="mapLayer"></g>
+          <g id="roomsLayer"></g>
+          <g id="draftLayer"></g>
+        </g>
+      </svg>
+      <div id="empty" class="empty">
+        <p class="big">DROP A<br />FLOOR PLAN</p>
+        <p>PDF, JPG or PNG. Pre-drawn plans become rooms the app maps with LiDAR.</p>
+        <button id="emptyUpload" class="pill solid">CHOOSE FILE</button>
+      </div>
+      <div id="dropzone" class="dropzone" hidden><span>RELEASE TO UPLOAD</span></div>
+      <p id="hint" class="hint"></p>
+      <div id="busy" class="busy" hidden><span class="dot red on"></span><span id="busyLabel">RENDERING</span></div>
+    </main>
+
+    <aside class="panel" id="panel">
+      <section>
+        <h2>PLAN</h2>
+        <label class="field"><span>NAME</span><input id="planName" placeholder="Ground floor" maxlength="60" /></label>
+        <div class="row" id="pageRow" hidden>
+          <span class="label">PDF PAGE</span>
+          <select id="page"></select>
+        </div>
+        <div class="row">
+          <span class="label">LOOK</span>
+          <div class="seg small" role="radiogroup">
+            <input type="radio" name="look" id="lookInk" value="ink" checked /><label for="lookInk">INK</label>
+            <input type="radio" name="look" id="lookOriginal" value="original" /><label for="lookOriginal">ORIGINAL</label>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>SCALE</h2>
+        <div class="readout"><b id="scaleReadout">--</b><span id="scaleSub">DRAW A LINE OF KNOWN LENGTH</span></div>
+        <div class="row">
+          <label class="field grow"><span>LINE LENGTH (M)</span><input id="scaleLength" type="number" min="0.1" step="0.01" inputmode="decimal" disabled /></label>
+          <button id="applyScale" class="pill" disabled>APPLY</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>ROOMS <span id="roomCount" class="count">00</span></h2>
+        <ul id="rooms" class="rooms"></ul>
+        <p id="roomsEmpty" class="muted">Pick ROOM and tap each corner. Tap the first corner or press Enter to close.</p>
+      </section>
+
+      <section>
+        <h2>PLACE ON MAP</h2>
+        <div class="readout"><b id="placeReadout">NOT PLACED</b><span id="placeSub">SCAN WALLS WITH THE APP, THEN AUTO-PLACE</span></div>
+        <div class="grid2">
+          <button id="autoplace" class="pill">AUTO-PLACE</button>
+          <button id="manual" class="pill">MANUAL</button>
+          <button data-rot="-90" class="pill">−90°</button>
+          <button data-rot="90" class="pill">+90°</button>
+          <button data-rot="-1" class="pill">−1°</button>
+          <button data-rot="1" class="pill">+1°</button>
+        </div>
+        <div class="row">
+          <button id="savePlacement" class="pill grow" disabled>SAVE PLACEMENT</button>
+          <button id="clearPlacement" class="pill" disabled>CLEAR</button>
+        </div>
+      </section>
+
+      <div class="savebar">
+        <p id="saveState" class="muted">NOT SAVED</p>
+        <button id="save" class="cta"><span>SAVE PLAN</span><span class="dot red"></span></button>
+      </div>
+    </aside>
+
+    <input id="file" type="file" accept=".pdf,application/pdf,image/jpeg,image/png" hidden />
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script type="module" src="./src/designer/main.js"></script>
+  </body>
+</html>

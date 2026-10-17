@@ -26,6 +26,13 @@ const PLAN = [
   [5, 0, 5, 3], [5, 3, 6.5, 3], [7.5, 3, 9, 3],
   [0, 4.5, 3, 4.5], [4, 4.5, 5, 4.5], [5, 4.5, 5, 7],
 ];
+// Doorways (the gaps in PLAN) and a window, as [x1, z1, x2, z2, y0, y1].
+const OPENINGS = [
+  { kind: 'door', s: [3, 4.5, 4, 4.5], y0: 0, y1: 2.05 },
+  { kind: 'door', s: [6.5, 3, 7.5, 3], y0: 0, y1: 2.05 },
+  { kind: 'window', s: [9, 1.2, 9, 2.8], y0: 0.9, y1: 2.1 },
+];
+const WALL_HEIGHT = 2.6;
 const PATH = [[2, 2], [4, 2], [4, 5.7], [7, 5.7], [7, 4], [7, 1.5], [3, 1.5]];
 const SIGHT = 4.5; // metres a phone "scans" around itself
 const FLOOR_Y = -1.35; // ARKit origin is where the session started, ~chest height
@@ -61,6 +68,31 @@ function growTo(prev, a, b, s) {
   return [...ends[0], ...ends.at(-1)];
 }
 const noise = () => (Math.random() * 2 - 1) * 0.03;
+const near = (x, z, px, pz) => Math.hypot(x - px, z - pz) < SIGHT;
+const floorSeen = [];
+const toLocal3 = (x, y, z) => {
+  const [lx, lz] = transformPoint2(x, z, toLocal);
+  return [lx, y + FLOOR_Y, lz];
+};
+
+// What a LiDAR sweep returns around the phone: wall surfaces and floor.
+function cloudAround(px, pz) {
+  const pts = [];
+  for (const s of PLAN) {
+    for (let k = 0; k < 12; k++) {
+      const f = Math.random();
+      const x = s[0] + (s[2] - s[0]) * f;
+      const z = s[1] + (s[3] - s[1]) * f;
+      if (near(x, z, px, pz)) pts.push(...toLocal3(x + noise(), Math.random() * WALL_HEIGHT, z + noise()));
+    }
+  }
+  for (let k = 0; k < 120; k++) {
+    const x = px + (Math.random() * 2 - 1) * SIGHT * 0.7;
+    const z = pz + (Math.random() * 2 - 1) * SIGHT * 0.7;
+    if (x > 0 && x < 9 && z > 0 && z < 7) pts.push(...toLocal3(x, noise() * 0.3, z));
+  }
+  return pts;
+}
 
 const url = new URL('/ws', args.server.replace(/^http/, 'ws'));
 url.searchParams.set('name', args.name);
@@ -102,10 +134,20 @@ ws.on('open', () => {
     const planPose = { p: [px, 1.4 + FLOOR_Y, pz], q: [0, Math.sin(h), 0, Math.cos(h)], fov: 50, aspect: 4 / 3 };
     ws.send(JSON.stringify({ t: 'pose', ...transformPose(planPose, toLocal) }));
 
-    if (tick++ % 10 === 0) {
+    if (tick % 10 === 0) {
       const walls = seen.filter(Boolean).map((s) => transformSegment(s, toLocal).map((v) => v + noise()));
-      ws.send(JSON.stringify({ t: 'planes', walls, floorY: FLOOR_Y }));
+      const openings = OPENINGS.filter((o) => near(o.s[0], o.s[1], px, pz)).map((o) => ({
+        kind: o.kind,
+        s: transformSegment(o.s, toLocal),
+        y0: o.y0 + FLOOR_Y,
+        y1: o.y1 + FLOOR_Y,
+      }));
+      floorSeen.push([Math.min(8.8, Math.max(0.2, px + 1.5)), pz], [Math.max(0.2, px - 1.5), pz], [px, Math.min(6.8, pz + 1.5)], [px, Math.max(0.2, pz - 1.5)]);
+      const floor = floorSeen.slice(-200).map(([x, z]) => transformPoint2(x, z, toLocal));
+      ws.send(JSON.stringify({ t: 'planes', walls, openings, floor, floorY: FLOOR_Y }));
     }
+    if (tick % 30 === 0) ws.send(JSON.stringify({ t: 'cloud', points: cloudAround(px, pz) }));
+    tick++;
   }, 100);
   if (+args.seconds) setTimeout(() => (clearInterval(timer), ws.close()), +args.seconds * 1000);
 });

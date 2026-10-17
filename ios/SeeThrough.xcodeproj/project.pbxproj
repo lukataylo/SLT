@@ -7,12 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */; };
 		382C00E4A7B6DFF15C1E0354 /* WallExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0543F7970E1CB561A1539DE /* WallExtractor.swift */; };
 		41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */; };
 		4BB7C8C778731DCFDF587004 /* FloorPlan3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */; };
 		71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */; };
 		810A5878BE87E2DA89045638 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37688A5E6599A96D2AC7850F /* ContentView.swift */; };
+		83D7725535250E63C3843F38 /* MeshProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */; };
 		911A7DE7CABFF639B2F68AD8 /* RelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 252D0BD0194B2B707AEDFE64 /* RelayClient.swift */; };
+		95D14F9EFFFDCB1700312A6C /* RoomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D009735BA12F6535F34463 /* RoomSheet.swift */; };
 		BC25F29C178A4A58AC36CC40 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC603A3EBE175DDBDDB44C4 /* Wire.swift */; };
 		C397696CCEBE494804B935EB /* ARCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */; };
 		EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5444AC4E972792FA3263D8D /* ARPreview.swift */; };
@@ -25,10 +28,13 @@
 		37688A5E6599A96D2AC7850F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan3D.swift; sourceTree = "<group>"; };
 		A7071494A513CF1EE48CCF9D /* SeeThrough.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SeeThrough.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A8D009735BA12F6535F34463 /* RoomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSheet.swift; sourceTree = "<group>"; };
 		AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan.swift; sourceTree = "<group>"; };
 		B0373ABAEAE8646612892A3B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorGeometry.swift; sourceTree = "<group>"; };
 		D0543F7970E1CB561A1539DE /* WallExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallExtractor.swift; sourceTree = "<group>"; };
 		E5444AC4E972792FA3263D8D /* ARPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARPreview.swift; sourceTree = "<group>"; };
+		E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshProcessor.swift; sourceTree = "<group>"; };
 		FFC603A3EBE175DDBDDB44C4 /* Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wire.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -39,10 +45,13 @@
 				1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */,
 				E5444AC4E972792FA3263D8D /* ARPreview.swift */,
 				37688A5E6599A96D2AC7850F /* ContentView.swift */,
+				BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */,
 				AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */,
 				5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */,
 				B0373ABAEAE8646612892A3B /* Info.plist */,
+				E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */,
 				252D0BD0194B2B707AEDFE64 /* RelayClient.swift */,
+				A8D009735BA12F6535F34463 /* RoomSheet.swift */,
 				1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */,
 				D0543F7970E1CB561A1539DE /* WallExtractor.swift */,
 				FFC603A3EBE175DDBDDB44C4 /* Wire.swift */,
@@ -128,9 +137,12 @@
 				C397696CCEBE494804B935EB /* ARCapture.swift in Sources */,
 				EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */,
 				810A5878BE87E2DA89045638 /* ContentView.swift in Sources */,
+				10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */,
 				41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */,
 				4BB7C8C778731DCFDF587004 /* FloorPlan3D.swift in Sources */,
+				83D7725535250E63C3843F38 /* MeshProcessor.swift in Sources */,
 				911A7DE7CABFF639B2F68AD8 /* RelayClient.swift in Sources */,
+				95D14F9EFFFDCB1700312A6C /* RoomSheet.swift in Sources */,
 				71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */,
 				382C00E4A7B6DFF15C1E0354 /* WallExtractor.swift in Sources */,
 				BC25F29C178A4A58AC36CC40 /* Wire.swift in Sources */,

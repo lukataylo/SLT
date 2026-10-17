@@ -1,4 +1,4 @@
-import { IDENTITY, isValidSegment, register, transformPose, transformSegment } from '../shared/planes.js';
+import { IDENTITY, isValidSegment, register, transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
 import { decodeFrame, encodeFrame, isValidPose, pickPose } from '../shared/protocol.js';
 import { LiveMap } from './livemap.js';
 
@@ -7,6 +7,9 @@ import { LiveMap } from './livemap.js';
 export const MAX_BUFFERED_BYTES = 512 * 1024;
 export const LIVE_WINDOW_MS = 3000;
 export const MAX_WALLS_PER_PEER = 300;
+const MAX_OPENINGS_PER_PEER = 100;
+const MAX_FLOOR_POINTS = 400;
+const MAX_CLOUD_PER_MESSAGE = 3 * 8000;
 
 // How sure registration must be before a phone's poses are trusted in the map.
 const MIN_INLIER_FRACTION = 0.6;
@@ -33,16 +36,25 @@ export class Room {
   constructor({ recorder = null, now = Date.now, map = new LiveMap() } = {}) {
     this.map = map;
     this.peers = new Map();
+    this.admins = new Map();
     this.nextId = 1;
     this.recorder = recorder;
     this.now = now;
     this.stats = { framesIn: 0, framesOut: 0, framesDropped: 0 };
   }
 
-  join(socket, { name, frame } = {}) {
+  join(socket, { name, frame, role } = {}) {
     const id = `p${this.nextId++}`;
-    const peer = { id, name: cleanName(name, id), socket, pose: null, lastFrame: null, lastFrameAt: 0 };
-    if (frame === 'local') Object.assign(peer, { local: true, alignment: null, localWalls: [], floorY: null });
+    if (role === 'admin') {
+      // Admin viewers watch everything but are not peers: nobody sees them.
+      this.admins.set(id, { id, socket });
+      this.sendJson({ socket }, { t: 'admin', map: this.map.toJSON(), devices: this.devices(), clouds: this.map.clouds() });
+      return id;
+    }
+    const peer = { id, name: cleanName(name, id), socket, pose: null, lastFrame: null, lastFrameAt: 0, lastSeenAt: this.now() };
+    if (frame === 'local') {
+      Object.assign(peer, { local: true, alignment: null, localWalls: [], localOpenings: [], localFloor: [], floorY: null, roomId: null });
+    }
     this.sendJson(peer, { t: 'welcome', id, name: peer.name, peers: this.snapshot(id), map: this.map.toJSON() });
     for (const other of this.peers.values()) {
       if (other.lastFrame) this.sendBinary(peer, other.lastFrame);
@@ -53,6 +65,7 @@ export class Room {
   }
 
   leave(id) {
+    if (this.admins.delete(id)) return;
     const peer = this.peers.get(id);
     if (!peer) return;
     this.peers.delete(id);
@@ -73,6 +86,7 @@ export class Room {
   handleText(id, text) {
     const peer = this.peers.get(id);
     if (!peer) return;
+    peer.lastSeenAt = this.now();
     let msg;
     try {
       msg = JSON.parse(text);
@@ -86,13 +100,100 @@ export class Room {
       this.broadcastJson({ t: 'pose', id, ...pose }, id);
     } else if (msg?.t === 'planes' && peer.local && Array.isArray(msg.walls)) {
       peer.localWalls = msg.walls.filter(isValidSegment).slice(0, MAX_WALLS_PER_PEER);
+      peer.localOpenings = (Array.isArray(msg.openings) ? msg.openings : [])
+        .filter((o) => (o?.kind === 'door' || o?.kind === 'window') && isValidSegment(o.s) && Number.isFinite(o.y0) && Number.isFinite(o.y1))
+        .slice(0, MAX_OPENINGS_PER_PEER);
+      peer.localFloor = (Array.isArray(msg.floor) ? msg.floor : [])
+        .filter((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite))
+        .slice(0, MAX_FLOOR_POINTS);
       if (Number.isFinite(msg.floorY)) peer.floorY = msg.floorY;
       this.alignPeer(peer);
+    } else if (msg?.t === 'cloud' && peer.local && Array.isArray(msg.points)) {
+      this.addCloud(peer, msg.points.slice(0, MAX_CLOUD_PER_MESSAGE));
+    } else if (msg?.t === 'room' && peer.local) {
+      this.roomCommand(peer, msg);
     }
   }
 
+  // --- Rooms ------------------------------------------------------------------
+
+  roomCommand(peer, msg) {
+    if (msg.action === 'reset-map') {
+      this.map.resetAll();
+      for (const p of this.peers.values()) {
+        if (!p.local) continue;
+        Object.assign(p, { alignment: null, roomId: null, pendingJump: null });
+        this.sendJson(p, { t: 'reset', scope: 'map' });
+        this.sendAlign(p, null);
+      }
+      this.broadcastAdmins({ t: 'cloud-reset', roomId: null });
+      this.broadcastMap();
+      return;
+    }
+    if (!peer.alignment) return;
+    if (msg.action === 'new') {
+      // A new room starts where this phone stands; its walls so far stay with
+      // the room they were scanned in.
+      this.map.commit(peer.id);
+      const here = this.mapPosition(peer) ?? [0, 0];
+      const planRoom = this.map.plan?.rooms?.find((r) => r.id === msg.planRoomId);
+      const room = this.map.createRoom({
+        name: msg.name || planRoom?.name,
+        origin: here.map((v) => Math.round(v * 1000) / 1000),
+        planRoomId: planRoom?.id ?? null,
+        at: new Date(this.now()).toISOString(),
+      });
+      this.enterRoom(peer, room.id);
+    } else if (msg.action === 'switch' && this.map.room(msg.roomId)) {
+      this.map.commit(peer.id);
+      this.enterRoom(peer, msg.roomId);
+    } else if (msg.action === 'reset-room') {
+      const roomId = this.map.room(msg.roomId) ? msg.roomId : peer.roomId;
+      if (!this.map.resetRoom(roomId)) return;
+      for (const p of this.peers.values()) {
+        if (p.local && p.roomId === roomId) this.sendJson(p, { t: 'reset', scope: 'room', roomId });
+      }
+      this.broadcastAdmins({ t: 'cloud-reset', roomId });
+      this.broadcastMap();
+    }
+  }
+
+  // The phone clears its local plane anchors on entering a room, so only what
+  // it scans from here on is attributed to the new room. Tracking (and so the
+  // alignment) carries over.
+  enterRoom(peer, roomId) {
+    peer.roomId = roomId;
+    peer.localWalls = [];
+    peer.localOpenings = [];
+    peer.localFloor = [];
+    this.sendJson(peer, { t: 'reset', scope: 'room', roomId });
+    this.sendAlign(peer, null);
+    this.broadcastMap();
+  }
+
+  mapPosition(peer) {
+    return peer.pose ? [peer.pose.p[0], peer.pose.p[2]] : null;
+  }
+
+  addCloud(peer, flat) {
+    if (!peer.alignment || !peer.roomId) return;
+    const T = peer.alignment;
+    const out = new Array(flat.length);
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      const [x, z] = transformPoint2(flat[i], flat[i + 2], T);
+      out[i] = x;
+      out[i + 1] = flat[i + 1] + T.t[1];
+      out[i + 2] = z;
+    }
+    const added = this.map.addCloud(peer.roomId, out);
+    if (added.length) this.broadcastAdmins({ t: 'cloud', roomId: peer.roomId, points: added });
+  }
+
   alignPeer(peer) {
-    const floorDy = -(peer.floorY ?? 0);
+    // Ground first: the map's floor is y = 0, so a phone can't found or join
+    // the map until it has found the floor it stands on.
+    if (peer.floorY == null) return this.sendAlign(peer, { method: 'floor', correction: 'none' });
+    const floorDy = -peer.floorY;
     let result = null;
     const anyoneElseAligned = [...this.peers.values()].some((p) => p !== peer && p.alignment);
     if (!this.map.origin && !peer.alignment && !anyoneElseAligned) {
@@ -110,10 +211,20 @@ export class Room {
       result = { method: 'walls', ...fit, correction };
     }
     if (peer.alignment) {
-      this.map.setContribution(
-        peer.id,
-        peer.localWalls.map((s) => transformSegment(s, peer.alignment)),
-      );
+      if (!peer.roomId || !this.map.room(peer.roomId)) {
+        const T = peer.alignment;
+        const here = this.mapPosition(peer) ?? transformPoint2(0, 0, T);
+        peer.roomId = this.map.roomAt(here)?.id ?? null;
+      }
+      const T = peer.alignment;
+      this.map.setContribution(peer.id, {
+        roomId: peer.roomId,
+        walls: peer.localWalls.map((s) => transformSegment(s, T)),
+        openings: peer.localOpenings.map((o) => ({ kind: o.kind, s: transformSegment(o.s, T), y0: o.y0 + T.t[1], y1: o.y1 + T.t[1] })),
+        floor: peer.localFloor.map(([x, z]) => transformPoint2(x, z, T)),
+      });
+      // Lay an uploaded floor plan onto the scan as soon as it fits.
+      if (this.map.plan && !this.map.plan.placement && this.map.plan.rooms?.length) this.map.autoPlace();
       this.broadcastMap();
     }
     this.sendAlign(peer, result);
@@ -155,6 +266,8 @@ export class Room {
       alignment: peer.alignment ?? IDENTITY,
       origin: this.map.origin,
       walls: peer.localWalls.length,
+      roomId: peer.roomId,
+      needsFloor: peer.floorY == null,
       ...(result && {
         method: result.method,
         correction: result.correction,
@@ -166,12 +279,40 @@ export class Room {
   }
 
   broadcastMap() {
-    this.broadcastJson({ t: 'map', ...this.map.toJSON() });
+    const msg = { t: 'map', ...this.map.toJSON() };
+    this.broadcastJson(msg);
+    this.broadcastAdmins(msg);
+  }
+
+  broadcastAdmins(msg) {
+    if (!this.admins.size) return;
+    const text = JSON.stringify(msg);
+    for (const a of this.admins.values()) if (a.socket.readyState === OPEN) a.socket.send(text);
+  }
+
+  devices() {
+    const now = this.now();
+    return [...this.peers.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      kind: p.local ? 'lidar' : 'web',
+      pose: p.pose,
+      aligned: p.local ? !!p.alignment : true,
+      roomId: p.roomId ?? null,
+      // live: streaming video; online: sent anything (pose, scan, frame) recently.
+      live: now - p.lastFrameAt < LIVE_WINDOW_MS,
+      online: now - p.lastSeenAt < LIVE_WINDOW_MS,
+    }));
+  }
+
+  broadcastDevices() {
+    this.broadcastAdmins({ t: 'devices', devices: this.devices() });
   }
 
   handleFrame(id, data) {
     const peer = this.peers.get(id);
     if (!peer) return;
+    peer.lastSeenAt = this.now();
     let frame;
     try {
       frame = decodeFrame(data);

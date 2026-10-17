@@ -370,3 +370,63 @@ export function register(local, map, { initial = null, step = 0.2, inlierDist = 
   );
   return { yaw: wrapAngle(best.T.yaw), t: best.T.t, inlierFraction: best.inlierFraction, inlierLength: best.inlierLength, rms: best.rms, ambiguous };
 }
+
+// --- Helpers for rooms, openings, floors and plans -------------------------
+
+const DEFAULT_TOL = { angleTol: 10 * DEG, distTol: 0.25, gapTol: 0.5 };
+
+// Whether two segments are observations of the same wall line.
+export function sameWall(a, b, tol = DEFAULT_TOL) {
+  return canMerge(a, b, tol);
+}
+
+export function fuseSegments(a, b, wa, wb) {
+  return fuse(a, b, wa, wb);
+}
+
+// Inverse of an alignment: maps the target frame back onto the source frame.
+export function invert({ yaw, t }) {
+  const [x, z] = transformPoint2(t[0], t[2], { yaw: -yaw, t: [0, 0, 0] });
+  return { yaw: -yaw, t: [-x, -(t[1] ?? 0), -z] };
+}
+
+// Andrew's monotone chain; points are [x, z]. Returns the hull counter-clockwise.
+export function convexHull(points) {
+  const pts = points.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return pts;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (const p of [...pts].reverse()) {
+    while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+export function pointInPolygon([x, z], poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i];
+    const [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Room outlines drawn on a floor plan, as wall segments (shared edges merged).
+export function polygonWalls(polygons) {
+  const segs = [];
+  for (const poly of polygons) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      segs.push([a[0], a[1], b[0], b[1]]);
+    }
+  }
+  return mergeSegments(segs, { distTol: 0.15, gapTol: 0.1 });
+}

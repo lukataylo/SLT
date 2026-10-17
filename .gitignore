@@ -6,3 +6,4 @@ client/public/splats/*
 .DS_Store
 ios/**/xcuserdata/
 ios/build/
+data/

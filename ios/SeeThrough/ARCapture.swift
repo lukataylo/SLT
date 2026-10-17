@@ -2,51 +2,71 @@ import ARKit
 import CoreImage
 import Foundation
 
-/// Runs ARKit world tracking with LiDAR plane detection and turns each frame
-/// into the three things the relay wants: poses, JPEG frames and walls.
+/// Runs ARKit world tracking with LiDAR plane detection and scene
+/// reconstruction, and turns frames into what the relay wants: poses, JPEG
+/// frames, the vectorised local scan (walls, doors/windows, floor) and a
+/// LiDAR point cloud.
 final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var tracking = "STARTING"
-    @Published private(set) var wallCount = 0
-    @Published private(set) var floorFound = false
     @Published private(set) var hasLiDAR = false
-    /// This phone's walls and position in its own ARKit frame, for the map
-    /// card before (or without) a server alignment.
-    @Published private(set) var localWalls: [[Float]] = []
+    /// This phone's scan in its own ARKit frame: shown before alignment, and
+    /// sent to the server for alignment and the shared map.
+    @Published private(set) var scan = LocalScan()
     @Published private(set) var localMark: Mark?
 
     let session = ARSession()
     var onPose: ((Pose) -> Void)?
     var onFrame: ((Pose, Data) -> Void)?
-    var onPlanes: (([[Float]], Float?) -> Void)?
+    var onScan: ((LocalScan) -> Void)?
+    var onCloud: (([Float]) -> Void)?
 
     private static let poseInterval: TimeInterval = 1.0 / 15
     private static let frameInterval: TimeInterval = 1.0 / 8
-    private static let planesInterval: TimeInterval = 1.0
+    private static let scanInterval: TimeInterval = 1.0
+    private static let meshInterval: TimeInterval = 2.5
     private static let captureWidth: CGFloat = 480
 
     private var lastPose: TimeInterval = 0
     private var lastFrame: TimeInterval = 0
-    private var lastPlanes: TimeInterval = 0
+    private var lastScan: TimeInterval = 0
+    private var lastMesh: TimeInterval = 0
     private var encoding = false
+    private var meshOpenings: [Opening] = []
+    private let mesh = MeshProcessor()
     private let encodeQueue = DispatchQueue(label: "slt.jpeg", qos: .userInitiated)
     private let ciContext = CIContext()
 
-    func start() {
+    private lazy var configuration: ARWorldTrackingConfiguration = {
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
         config.planeDetection = [.horizontal, .vertical]
-        // The reconstructed mesh is only drawn as scanning feedback; walls come
-        // from plane anchors, which LiDAR makes fast and accurate.
+        // The classified mesh finds doors and windows and feeds the point cloud.
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
             config.sceneReconstruction = .meshWithClassification
-            hasLiDAR = true
         }
+        return config
+    }()
+
+    func start() {
+        hasLiDAR = ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification)
         session.delegate = self
-        session.run(config)
+        session.run(configuration)
     }
 
     func pause() {
         session.pause()
+    }
+
+    /// Clears what this phone has scanned. A room reset keeps tracking (and so
+    /// the alignment); a map reset restarts tracking too.
+    func reset(restartTracking: Bool) {
+        var options: ARSession.RunOptions = [.removeExistingAnchors]
+        if restartTracking { options.insert(.resetTracking) }
+        session.run(configuration, options: options)
+        mesh.reset()
+        meshOpenings = []
+        scan = LocalScan()
+        lastScan = 0
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -59,13 +79,19 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
             localMark = Mark(position: pose.position, orientation: pose.orientation)
             onPose?(pose)
         }
-        if now - lastPlanes >= Self.planesInterval {
-            lastPlanes = now
-            let (walls, floorY) = WallExtractor.extract(from: frame.anchors)
-            wallCount = walls.count
-            localWalls = walls
-            floorFound = floorY != nil
-            onPlanes?(walls, floorY)
+        if now - lastScan >= Self.scanInterval {
+            lastScan = now
+            var next = WallExtractor.extract(from: frame.anchors)
+            next.openings += meshOpenings.filter { m in !next.openings.contains { $0.kind == m.kind && simd_distance(($0.a + $0.b) / 2, (m.a + m.b) / 2) < 0.5 } }
+            scan = next
+            onScan?(next)
+        }
+        if hasLiDAR && now - lastMesh >= Self.meshInterval {
+            lastMesh = now
+            mesh.process(MeshProcessor.snapshot(frame.anchors), walls: scan.walls) { [weak self] openings, points in
+                self?.meshOpenings = openings
+                if !points.isEmpty { self?.onCloud?(points) }
+            }
         }
         // Encode off the main thread, at most one frame at a time, so ARKit
         // never has to hold back more than one camera buffer for us.

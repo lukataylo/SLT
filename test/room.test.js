@@ -34,7 +34,7 @@ function setup() {
 
 test('joining sends a welcome with existing peers and announces the newcomer', () => {
   const { a, b, idA, idB } = setup();
-  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 0, origin: null, walls: [], seen: [] } });
+  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 1, origin: null, plan: null, rooms: [], walls: [], seen: [] } });
   assert.equal(b.json[0].peers[0].id, idA);
   assert.deepEqual(a.json[1], { t: 'join', id: idB, name: 'Ben' });
 });
@@ -192,7 +192,7 @@ test('the origin is founded once and survives a restart', () => {
 
   // After a restart, a phone that starts elsewhere must align to the saved
   // origin instead of founding a new one.
-  const room = new Room({ map: new LiveMap({ base: saved.walls, origin: saved.origin }) });
+  const room = new Room({ map: new LiveMap(saved) });
   const inv = { yaw: -Math.PI / 2, t: [-1, 0, -3] };
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'Later', frame: 'local' });
@@ -245,4 +245,109 @@ test('placed phones take small blended corrections and resist one-off jumps', ()
   room.handleText(id, planes(jump));
   assert.equal(last(phone, 'align').correction, 'relocated');
   assert.ok(Math.abs(last(phone, 'align').alignment.t[0] - 2) < 0.05);
+});
+
+// --- Grounding, rooms, openings, cloud, admin -------------------------------
+
+test('a phone must find the floor before it can found or join the map', () => {
+  const room = new Room();
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, JSON.stringify({ t: 'planes', walls: ROOM }));
+  assert.equal(last(phone, 'align').needsFloor, true);
+  assert.equal(room.map.origin, null);
+  room.handleText(id, planes(ROOM, -1.2));
+  assert.equal(last(phone, 'align').aligned, true);
+  assert.equal(last(phone, 'align').roomId, 'r1', 'founding creates Room 1');
+});
+
+test('doors, windows and the floor outline land in the phone\'s room', () => {
+  const room = new Room();
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, JSON.stringify({
+    t: 'planes', walls: ROOM, floorY: -1.3,
+    openings: [{ kind: 'door', s: [3, 4, 3.9, 4], y0: -1.3, y1: 0.7 }, { kind: 'bogus', s: [0, 0, 1, 0], y0: 0, y1: 1 }],
+    floor: [[0.2, 0.2], [5.8, 0.2], [5.8, 3.8], [0.2, 3.8], [3, 2]],
+  }));
+  const r1 = room.map.toJSON().rooms[0];
+  assert.equal(r1.openings.length, 1);
+  assert.equal(r1.openings[0].kind, 'door');
+  assert.ok(Math.abs(r1.openings[0].y0) < 1e-9 && Math.abs(r1.openings[0].y1 - 2) < 1e-9, 'heights grounded on the floor');
+  assert.equal(r1.floor.length, 4, 'floor outline is a hull');
+});
+
+test('a new room starts at the phone and keeps earlier walls in the old room', () => {
+  const room = new Room();
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, planes(ROOM));
+  room.handleText(id, JSON.stringify({ t: 'pose', p: [4, 0.1, 2], q: [0, 0, 0, 1] }));
+  room.handleText(id, JSON.stringify({ t: 'room', action: 'new', name: 'Kitchen' }));
+  assert.deepEqual(last(phone, 'reset'), { t: 'reset', scope: 'room', roomId: 'r2' });
+  const rooms = room.map.toJSON().rooms;
+  assert.deepEqual(rooms.map((r) => [r.id, r.name, r.walls.length]), [['r1', 'Room 1', 5], ['r2', 'Kitchen', 0]]);
+  assert.deepEqual(rooms[1].origin, [4, 2]);
+
+  room.handleText(id, planes([[6, 0, 9, 0], [9, 0, 9, 4], [6, 0, 6, 4]]));
+  assert.equal(room.map.toJSON().rooms[1].walls.length, 3);
+  assert.equal(room.map.toJSON().rooms[0].walls.length, 5);
+});
+
+test('resetting a room clears it; resetting the map clears the origin and alignments', () => {
+  const room = new Room();
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, planes(ROOM));
+  room.handleText(id, JSON.stringify({ t: 'room', action: 'reset-room' }));
+  assert.equal(room.map.toJSON().rooms[0].walls.length, 0);
+  assert.equal(room.map.origin.by, 'A', 'the origin survives a room reset');
+
+  room.handleText(id, JSON.stringify({ t: 'room', action: 'reset-map' }));
+  assert.equal(room.map.origin, null);
+  assert.equal(room.map.rooms.length, 0);
+  assert.deepEqual(last(phone, 'reset'), { t: 'reset', scope: 'map' });
+  assert.equal(last(phone, 'align').aligned, false);
+});
+
+test('admins get a snapshot, map updates, devices and cloud deltas; peers never see admins', () => {
+  const room = new Room({ now: () => 1000 });
+  const admin = new FakeSocket();
+  room.join(admin, { role: 'admin' });
+  assert.equal(admin.json[0].t, 'admin');
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  assert.equal(phone.json[0].peers.length, 0, 'admin is invisible to peers');
+
+  room.handleText(id, planes(ROOM));
+  assert.ok(last(admin, 'map'));
+  room.handleText(id, JSON.stringify({ t: 'cloud', points: [1, -1.3, 1, 1.02, -1.3, 1.01, 2, 0, 2] }));
+  const cloud = last(admin, 'cloud');
+  assert.equal(cloud.roomId, 'r1');
+  assert.equal(cloud.points.length, 6, 'points within one voxel are deduplicated');
+  assert.ok(Math.abs(cloud.points[1]) < 1e-9, 'cloud is grounded on the floor');
+
+  room.broadcastDevices();
+  const dev = last(admin, 'devices').devices[0];
+  assert.deepEqual([dev.kind, dev.aligned, dev.roomId], ['lidar', true, 'r1']);
+});
+
+test('an uploaded plan is placed onto the scan automatically', () => {
+  const room = new Room();
+  // Plan frame: the same ROOM, but drawn rotated 90° and shifted on the page.
+  const toPlan = { yaw: Math.PI / 2, t: [2, 0, 8] };
+  // An L-shaped room: unlike a plain rectangle it only fits the plan one way.
+  const L = [[0, 0], [6, 0], [6, 2], [3, 2], [3, 4], [0, 4]];
+  const poly = L.map(([x, z]) => {
+    const c = Math.cos(toPlan.yaw), s = Math.sin(toPlan.yaw);
+    return [c * x + s * z + toPlan.t[0], -s * x + c * z + toPlan.t[2]];
+  });
+  room.map.setPlan({ id: 'plan1', name: 'Flat', rooms: [{ id: 'pr1', name: 'Lounge', polygon: poly }], placement: null });
+  const id = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(id, planes(L.map((p, i) => [...p, ...L[(i + 1) % L.length]])));
+  const placement = room.map.plan.placement;
+  assert.ok(placement, 'placed');
+  // Plan → map must undo toPlan: plan corner (2, 8) is map (0, 0).
+  const [x, z] = [Math.cos(placement.yaw) * 2 + Math.sin(placement.yaw) * 8 + placement.t[0], -Math.sin(placement.yaw) * 2 + Math.cos(placement.yaw) * 8 + placement.t[2]];
+  assert.ok(Math.hypot(x, z) < 0.1, `plan corner maps to ${x}, ${z}`);
 });
