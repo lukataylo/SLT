@@ -146,6 +146,8 @@ export class Room {
         target.role = msg.role;
         this.broadcastPeers();
       }
+    } else if (msg?.t === 'locate' && peer.local) {
+      this.locatePeer(peer, msg);
     }
   }
 
@@ -244,6 +246,49 @@ export class Room {
     peer.pairingWith = null;
     if (!peer.roomId || !this.map.room(peer.roomId)) peer.roomId = this.map.roomAt(transformPoint2(0, 0, peer.alignment))?.id ?? null;
     this.sendAlign(peer, { method: resume ? 'resumed' : 'paired', correction: 'locked' });
+    this.broadcastMap();
+  }
+
+  // Placing a phone by hand on the uploaded floor plan: the user taps where
+  // they stand and which way they face. `p` [x, z] and `heading` are in plan
+  // metres; `local` { x, z, yaw } is the phone's own pose at that moment. If the
+  // plan isn't on the map yet, the tap places the plan instead: around this
+  // phone if it's already located, or as the map frame itself on an empty map.
+  locatePeer(peer, msg) {
+    const plan = this.map.plan;
+    const l = msg.local;
+    const finite = (...v) => v.every(Number.isFinite);
+    if (!plan || !Array.isArray(msg.p) || !finite(msg.p[0], msg.p[1], msg.heading) || !l || !finite(l.x, l.z, l.yaw)) return;
+    if (peer.floorY == null) return this.sendJson(peer, { t: 'locate', error: 'Point the phone at the floor first.' });
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const at = new Date(this.now()).toISOString();
+    if (!plan.placement) {
+      const anyoneAligned = [...this.peers.values()].some((p) => p.alignment);
+      if (!this.map.origin && !anyoneAligned) {
+        this.map.found({ by: peer.name, at });
+        this.map.setPlacement({ yaw: 0, t: [0, 0, 0] });
+      } else if (peer.alignment) {
+        const [mx, mz] = transformPoint2(l.x, l.z, peer.alignment);
+        const yaw = wrap(l.yaw + peer.alignment.yaw - msg.heading);
+        const [rx, rz] = transformPoint2(msg.p[0], msg.p[1], { yaw, t: [0, 0, 0] });
+        this.map.setPlacement({ yaw, t: [mx - rx, 0, mz - rz] });
+        this.sendJson(peer, { t: 'locate', placed: 'plan' });
+        return this.broadcastMap();
+      } else {
+        return this.sendJson(peer, { t: 'locate', error: "The plan isn't on the map yet. Pair with a located phone or scan first." });
+      }
+    } else if (!this.map.origin) {
+      this.map.found({ by: peer.name, at });
+    }
+    const P = plan.placement;
+    const [X, Z] = transformPoint2(msg.p[0], msg.p[1], P);
+    const yaw = wrap(msg.heading + P.yaw - l.yaw);
+    const [rx, rz] = transformPoint2(l.x, l.z, { yaw, t: [0, 0, 0] });
+    peer.alignment = { yaw, t: [X - rx, -peer.floorY, Z - rz] };
+    peer.pendingJump = null;
+    if (!peer.roomId || !this.map.room(peer.roomId)) peer.roomId = this.map.roomAt([X, Z])?.id ?? null;
+    this.sendJson(peer, { t: 'locate', placed: 'phone' });
+    this.sendAlign(peer, { method: 'plan', correction: 'locked' });
     this.broadcastMap();
   }
 

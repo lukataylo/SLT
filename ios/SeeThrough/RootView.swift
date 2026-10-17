@@ -26,8 +26,8 @@ private struct RootContent: View {
                 session: capture.session,
                 // Views are shown on screen (LiveView), not placed in 3D.
                 alignment: relay.alignment.aligned ? relay.alignment.transform : nil,
-                showMesh: model.mode == .scan && settings.showMesh,
-                showPlanes: model.mode == .scan && settings.showPlanes
+                showMesh: (model.mode == .scan || model.mode == .floorplan) && settings.showMesh,
+                showPlanes: (model.mode == .scan || model.mode == .floorplan) && settings.showPlanes
             )
             .ignoresSafeArea()
 
@@ -38,6 +38,7 @@ private struct RootContent: View {
             case .live: LiveView(model: model, relay: relay, capture: capture)
             case .scan: ScanView(model: model, relay: relay, capture: capture)
             case .pairScan: PairScanView(model: model)
+            case .floorplan: LiveFloorPlanView(model: model, relay: relay, capture: capture, settings: settings)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.mode)
@@ -46,6 +47,7 @@ private struct RootContent: View {
             case .rooms: RoomPickerView(model: model, relay: relay)
             case .showCode: ShowCodeView(model: model, relay: relay, capture: capture)
             case .settings: SettingsView(model: model, relay: relay, settings: settings)
+            case .plan: PlanSheet(model: model, relay: relay, capture: capture, settings: settings, upload: model.planUpload)
             }
         }
     }

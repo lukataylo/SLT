@@ -62,6 +62,21 @@ struct SettingsView: View {
                             .font(Theme.mono(13)).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                             .padding(14).background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.06)))
                         Text("Phones that pair by code join that phone's server automatically.").font(.footnote).foregroundStyle(Theme.muted)
+                        SecureField("Admin token (for plan uploads)", text: $settings.adminToken)
+                            .font(Theme.mono(13)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .padding(14).background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.06)))
+                    }
+                }
+
+                section("Floor plan") {
+                    PillButton(title: "Upload floor plan", filled: false) { model.openPlan(upload: true) }
+                    Text("A photo of a printed plan, a PDF or an image. Everyone on the map sees it, including the operator.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                    PillButton(title: "Build floor plan live (LiDAR)", filled: false) { model.openLiveFloorPlan() }
+                    Text("Walk the building and watch the floor plan draw itself from this phone's LiDAR. Save it as the floor plan when it looks right.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                    if relay.plan != nil {
+                        PillButton(title: "Locate this phone on the plan", filled: false) { model.openPlan(upload: false) }
                     }
                 }
 

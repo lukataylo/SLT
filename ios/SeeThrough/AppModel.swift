@@ -15,6 +15,8 @@ final class Settings: ObservableObject {
     @Published var wallGhosts: Bool { didSet { defaults.set(wallGhosts, forKey: "wallGhosts") } }
     @Published var haptics: Bool { didSet { defaults.set(haptics, forKey: "haptics"); Haptics.enabled = haptics } }
     @Published var xray: Double { didSet { defaults.set(xray, forKey: "xray") } }
+    /// Needed to upload a floor plan when the server sets ADMIN_TOKEN.
+    @Published var adminToken: String { didSet { defaults.set(adminToken, forKey: "adminToken") } }
 
     static let defaultServer = "https://web-production-94bf8.up.railway.app"
 
@@ -31,6 +33,7 @@ final class Settings: ObservableObject {
         wallGhosts = d.bool(forKey: "wallGhosts")
         haptics = d.bool(forKey: "haptics")
         xray = d.double(forKey: "xray")
+        adminToken = d.string(forKey: "adminToken") ?? ""
         Haptics.enabled = haptics
     }
 }
@@ -42,8 +45,8 @@ final class Settings: ObservableObject {
 /// the 3D map) stays available from Settings.
 @MainActor
 final class AppModel: ObservableObject {
-    enum Mode: Equatable { case start, creating, group, live, scan, pairScan }
-    enum Sheet: String, Identifiable { case rooms, showCode, settings; var id: String { rawValue } }
+    enum Mode: Equatable { case start, creating, group, live, scan, pairScan, floorplan }
+    enum Sheet: String, Identifiable { case rooms, showCode, settings, plan; var id: String { rawValue } }
 
     /// The room the user chose to scan: an existing one, or a new one.
     struct RoomIntent: Equatable {
@@ -64,6 +67,10 @@ final class AppModel: ObservableObject {
     @Published var sheet: Sheet?
     @Published var roomIntent: RoomIntent?
     @Published var scanState: ScanState = .looking
+    /// The plan sheet opens on uploading a new drawing (else on locating).
+    @Published var planUpload = false
+    /// Where to go back to from the live floor plan.
+    var beforeFloorPlan: Mode = .start
     /// Where to go after scanning a pairing code, and on cancelling it.
     private var afterPairing: Mode = .group
     private var onCancelPairing: Mode = .start
@@ -157,7 +164,7 @@ final class AppModel: ObservableObject {
         // it aligned, colour points keep growing the 3D map.
         let inGroup = mode == .group || mode == .live
         capture.sendFrames = inGroup && settings.shareCamera
-        capture.sendCloud = (inGroup || mode == .scan) && settings.captureColour
+        capture.sendCloud = (inGroup || mode == .scan || mode == .floorplan) && settings.captureColour
         capture.detectQR = mode == .pairScan
         if mode != .pairScan { capture.stopTrackingCodes() }
     }
@@ -167,6 +174,17 @@ final class AppModel: ObservableObject {
     func createGroup() {
         relay.createGroup()
         mode = .creating
+    }
+
+    func openPlan(upload: Bool) {
+        planUpload = upload
+        sheet = .plan
+    }
+
+    func openLiveFloorPlan() {
+        if mode != .floorplan { beforeFloorPlan = mode }
+        sheet = nil
+        mode = .floorplan
     }
 
     func cancelCreate() {

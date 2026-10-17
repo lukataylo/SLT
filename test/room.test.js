@@ -572,3 +572,48 @@ test('review fixes: no double create, everyone hears the wipe, codes cleared, ca
   room.handleText(idB2, JSON.stringify({ t: 'pair', alignment: { yaw: 0, t: [0, 1.3, 0] }, resume: at }));
   assert.equal(last(b2, 'align').method, 'resumed');
 });
+
+test('locating by hand on the plan: places the plan around a located phone, then places other phones', () => {
+  const room = new Room();
+  room.map.setPlan({ id: 'plan1', name: 'Flat', rooms: [], placement: null });
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
+  room.handleText(idA, planes([], -1.2)); // founds the map where A stands
+  // A stands at its own (1, 0), facing -z (yaw 0), and says that's plan (5, 3) facing +x (heading -π/2).
+  room.handleText(idA, JSON.stringify({ t: 'locate', p: [5, 3], heading: -Math.PI / 2, local: { x: 1, z: 0, yaw: 0 } }));
+  assert.equal(last(a, 'locate').placed, 'plan');
+  const P = room.map.plan.placement;
+  const [px, pz] = [Math.cos(P.yaw) * 5 + Math.sin(P.yaw) * 3 + P.t[0], -Math.sin(P.yaw) * 5 + Math.cos(P.yaw) * 3 + P.t[2]];
+  assert.ok(Math.hypot(px - 1, pz) < 1e-9, 'plan point lands on the phone');
+
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'B', frame: 'local' });
+  room.handleText(idB, JSON.stringify({ t: 'locate', p: [5, 3], heading: 0, local: { x: 0, z: 0, yaw: 0 } }));
+  assert.match(last(b, 'locate').error, /floor/);
+  room.handleText(idB, planes([], -1.4));
+  assert.equal(last(b, 'align').aligned, false);
+  // B, at its origin facing its -z, says it stands where A stood, facing the way A faced.
+  room.handleText(idB, JSON.stringify({ t: 'locate', p: [5, 3], heading: -Math.PI / 2, local: { x: 0, z: 0, yaw: 0 } }));
+  const align = last(b, 'align');
+  assert.equal(align.aligned, true);
+  assert.equal(align.method, 'plan');
+  assert.ok(Math.abs(align.alignment.yaw) < 1e-9, 'same heading as A');
+  assert.ok(Math.hypot(align.alignment.t[0] - 1, align.alignment.t[2]) < 1e-9, 'B stands where A stood');
+  assert.equal(align.alignment.t[1], 1.4, 'grounded on its own floor');
+});
+
+test('on an empty map, locating on the plan founds the map in the plan frame', () => {
+  const room = new Room();
+  room.map.setPlan({ id: 'plan1', name: 'Flat', rooms: [], placement: null });
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.peers.get(id).floorY = -1; // floor found but not yet sent through planes
+  room.handleText(id, JSON.stringify({ t: 'locate', p: [2, 3], heading: 0.5, local: { x: 0, z: 0, yaw: 0 } }));
+  assert.ok(room.map.origin);
+  assert.deepEqual(room.map.plan.placement, { yaw: 0, t: [0, 0, 0] });
+  const align = last(phone, 'align');
+  assert.equal(align.method, 'plan');
+  assert.deepEqual(align.alignment.t, [2, 1, 3]);
+  assert.equal(align.alignment.yaw, 0.5);
+});

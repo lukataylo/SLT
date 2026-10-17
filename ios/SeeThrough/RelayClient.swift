@@ -25,6 +25,12 @@ struct PlanInfo: Equatable {
     var name: String
     var rooms: [Room]
     var placement: FloorTransform?
+    /// The drawing: served at `imageUrl`, `widthPx` × `heightPx`, plan
+    /// x = px × metresPerPx, z = py × metresPerPx (image down is +z).
+    var imageUrl: String?
+    var widthPx: Float = 0
+    var heightPx: Float = 0
+    var metresPerPx: Float = 0
 }
 
 /// Another phone's latest camera frame and where it was taken (map frame).
@@ -87,6 +93,12 @@ final class RelayClient: ObservableObject {
     var onPairingPose: ((_ codeOnMap: simd_float4x4, _ by: String) -> Void)?
     var onPairingUnknown: (() -> Void)?
     var onPairingDone: ((_ by: String) -> Void)?
+    /// Reply to placing this phone by hand on the plan: what got placed
+    /// ("phone", or "plan" when the tap laid the plan onto the map), or why not.
+    var onLocate: ((_ placed: String?, _ error: String?) -> Void)?
+    /// The uploaded plan's drawing, fetched when it changes.
+    @Published private(set) var planImage: UIImage?
+    private var planImageUrl: String?
     private(set) var server: URL?
 
     /// Other phones' live video, by peer id, for the x-ray view.
@@ -172,6 +184,53 @@ final class RelayClient: ObservableObject {
     /// Our alignment as worked out from a paired phone's map-origin anchor.
     func pair(_ alignment: FloorTransform) {
         sendText(["t": "pair", "alignment": ["yaw": Double(alignment.yaw), "t": [Double(alignment.tx), Double(alignment.ty), Double(alignment.tz)]]])
+    }
+
+    /// Places this phone by hand: it stands at `planPoint` (plan metres) facing
+    /// `heading`, and `local` is where its own tracking says it is right now.
+    func locate(planPoint: SIMD2<Float>, heading: Float, local: Mark) {
+        sendText(["t": "locate", "p": [Double(planPoint.x), Double(planPoint.y)], "heading": Double(heading),
+                  "local": ["x": Double(local.x), "z": Double(local.z), "yaw": Double(local.yaw)]])
+    }
+
+    /// Uploads a floor plan drawing (replacing any earlier one) over the
+    /// plan REST API. The map update that follows brings it back to every phone.
+    func uploadPlan(name: String, jpeg: Data, widthPx: Int, heightPx: Int, metresPerPx: Double, token: String,
+                    rooms: [[String: Any]] = []) async throws {
+        guard let server, let url = URL(string: "/api/plan", relativeTo: server) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "x-admin-token") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "name": name, "image": "data:image/jpeg;base64," + jpeg.base64EncodedString(),
+            "widthPx": widthPx, "heightPx": heightPx, "metresPerPx": metresPerPx, "rooms": rooms,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw PlanUploadError(message: status == 401 ? "This server needs an admin token. Add it in Settings → Advanced." : message ?? "Upload failed (\(status)).")
+        }
+    }
+
+    /// Lays the uploaded plan onto the map (plan frame → map frame).
+    func setPlanPlacement(_ placement: FloorTransform, token: String) async throws {
+        guard let server, let url = URL(string: "/api/plan/placement", relativeTo: server) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "x-admin-token") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "yaw": Double(placement.yaw), "t": [Double(placement.tx), 0, Double(placement.tz)],
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw PlanUploadError(message: "Couldn't place the plan on the map.") }
+    }
+
+    struct PlanUploadError: LocalizedError {
+        var message: String
+        var errorDescription: String? { message }
     }
 
     func showPairing(code: String, codeOnMap: simd_float4x4) {
@@ -317,6 +376,8 @@ final class RelayClient: ObservableObject {
             case "done": onPairingDone?(msg["by"] as? String ?? "")
             default: break
             }
+        case "locate":
+            onLocate?(msg["placed"] as? String, msg["error"] as? String)
         case "collab":
             if let b64 = msg["data"] as? String, let data = Data(base64Encoded: b64) { onCollaboration?(data) }
         case "pose":
@@ -400,6 +461,18 @@ final class RelayClient: ObservableObject {
         originAt = (map["origin"] as? [String: Any])?["at"] as? String
         rooms = (map["rooms"] as? [[String: Any]] ?? []).compactMap(Self.room)
         plan = (map["plan"] as? [String: Any]).flatMap(Self.plan)
+        loadPlanImage()
+    }
+
+    private func loadPlanImage() {
+        guard plan?.imageUrl != planImageUrl else { return }
+        planImageUrl = plan?.imageUrl
+        planImage = nil
+        guard let path = planImageUrl, let server, let url = URL(string: path, relativeTo: server) else { return }
+        Task {
+            guard let (data, _) = try? await URLSession.shared.data(from: url), let image = UIImage(data: data) else { return }
+            if planImageUrl == path { planImage = image }
+        }
     }
 
     // MARK: parsing
@@ -443,7 +516,9 @@ final class RelayClient: ObservableObject {
         if let pl = p["placement"] as? [String: Any], let yaw = pl["yaw"] as? Double, let t = pl["t"] as? [Double], t.count == 3 {
             placement = FloorTransform(yaw: Float(yaw), tx: Float(t[0]), tz: Float(t[2]))
         }
-        return PlanInfo(name: p["name"] as? String ?? "Floor plan", rooms: rooms, placement: placement)
+        return PlanInfo(name: p["name"] as? String ?? "Floor plan", rooms: rooms, placement: placement,
+                        imageUrl: p["imageUrl"] as? String, widthPx: Float(p["widthPx"] as? Double ?? 0),
+                        heightPx: Float(p["heightPx"] as? Double ?? 0), metresPerPx: Float(p["metresPerPx"] as? Double ?? 0))
     }
 
     private static func mark(_ pose: [String: Any]) -> Mark? {
@@ -480,7 +555,17 @@ extension RelayClient {
         ]
         plan = PlanInfo(name: "Flat", rooms: [.init(id: "pr1", name: "Living", polygon: [SIMD2(0, 0), SIMD2(5, 0), SIMD2(5, 4.5), SIMD2(0, 4.5)]),
                                                .init(id: "pr2", name: "Bedroom", polygon: [SIMD2(0, 4.5), SIMD2(5, 4.5), SIMD2(5, 7), SIMD2(0, 7)])],
-                        placement: FloorTransform())
+                        placement: FloorTransform(), imageUrl: "demo", widthPx: 600, heightPx: 800, metresPerPx: 0.0125)
+        planImageUrl = "demo"
+        planImage = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 800)).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 800))
+            UIColor.black.setStroke()
+            for rect in [CGRect(x: 0, y: 0, width: 400, height: 360), CGRect(x: 0, y: 360, width: 400, height: 200), CGRect(x: 400, y: 0, width: 320, height: 240)] {
+                ctx.cgContext.setLineWidth(8)
+                ctx.cgContext.stroke(rect.insetBy(dx: 4, dy: 4))
+            }
+        }
         roomId = located ? "r1" : nil
         alignment = Alignment(aligned: located, method: located ? "walls" : nil, match: 0.92, ambiguous: false, needsFloor: false,
                               transform: FloorTransform(ty: 1.4))

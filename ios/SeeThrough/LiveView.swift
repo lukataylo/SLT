@@ -148,6 +148,7 @@ struct LiveView: View {
     /// around you as you turn, with everyone's position and view cone.
     private func radarDisc(_ all: [Other], size: CGFloat = 210) -> some View {
         let walls = relay.allWalls
+        let uploadedPlan = relay.plan
         let openings = relay.rooms.flatMap(\.openings)
         let me = capture.localMark.map { relay.alignment.transform.apply($0) }
         let marks = relay.peerMarks
@@ -174,6 +175,15 @@ struct LiveView: View {
             let ring = CGFloat(Float(range) / 2) * scale
             ctx.stroke(Path(ellipseIn: CGRect(x: c.x - ring, y: c.y - ring, width: 2 * ring, height: 2 * ring)),
                        with: .color(.white.opacity(0.12)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+            // The uploaded floor plan's rooms, once it's placed on the map.
+            if let placement = uploadedPlan?.placement {
+                var outline = Path()
+                for room in uploadedPlan?.rooms ?? [] where room.polygon.count >= 3 {
+                    let pts = room.polygon.map { v -> CGPoint in let (x, z) = placement.apply(v.x, v.y); return pt(x, z) }
+                    outline.move(to: pts[0]); pts.dropFirst().forEach { outline.addLine(to: $0) }; outline.closeSubpath()
+                }
+                ctx.stroke(outline, with: .color(.white.opacity(0.3)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            }
             // Floor plan from the LiDAR map.
             var plan = Path()
             for w in walls { plan.move(to: pt(w.a.x, w.a.y)); plan.addLine(to: pt(w.b.x, w.b.y)) }
