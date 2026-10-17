@@ -134,7 +134,10 @@ const server = createServer(async (req, res) => {
   serveStatic(req, res);
 });
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 2 * 1024 * 1024 });
+// ARKit's first collaboration exchange between two phones can run to
+// several megabytes, so the cap is generous.
+const MAX_MESSAGE_BYTES = Number(process.env.MAX_MESSAGE_BYTES ?? 16 * 1024 * 1024);
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_MESSAGE_BYTES });
 
 wss.on('connection', (ws, req) => {
   const params = new URL(req.url, 'http://x').searchParams;
@@ -145,6 +148,12 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => (ws.isAlive = true));
   ws.on('message', (data, isBinary) => (isBinary ? room.handleFrame(id, data) : room.handleText(id, data.toString())));
   ws.on('close', () => room.leave(id));
+  // One bad message (too large, malformed frame) must only cost that
+  // connection; without a listener ws rethrows and the whole server dies.
+  ws.on('error', (err) => {
+    console.warn(`[room] ${id} socket error: ${err.code ?? err.message}`);
+    ws.terminate();
+  });
   console.log(`[room] ${id} joined (${room.peers.size} connected)`);
 });
 
