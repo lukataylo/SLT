@@ -22,11 +22,11 @@ const ORIGIN_RED = 0xd71921;
 const GROUND_Y = -0.55; // the scan sits on a "curtain" above the ground frame
 
 // Line and marker colours per look. TRUE COLOUR keeps the green/cyan
-// accents; DEPTH is a monochrome hologram (white and grey on black, a fine
-// floor grid), with red left as the one accent for origin and selection.
+// accents; DEPTH is a monochrome hologram (white and grey on black, no floor
+// fill), with red left as the one accent for origin and selection.
 const PALETTES = {
-  colour: { floor: 0x0f8a45, floorLine: 0x35e07a, door: TILE_GREEN, window: 0x5ef0ff, roomOrigin: 0x9dfcd0, plan: 0x2a9fb0, person: TILE_GREEN, grid: false },
-  depth: { floor: 0xb0b0b0, floorLine: 0xdedede, door: 0xffffff, window: 0x9a9a9a, roomOrigin: 0xbdbdbd, plan: 0x8a8a8a, person: 0xffffff, grid: true },
+  colour: { floor: 0x0f8a45, floorLine: 0x35e07a, door: TILE_GREEN, window: 0x5ef0ff, roomOrigin: 0x9dfcd0, plan: 0x2a9fb0, person: TILE_GREEN },
+  depth: { floor: null, floorLine: 0xdedede, door: 0xffffff, window: 0x9a9a9a, roomOrigin: 0xbdbdbd, plan: 0x8a8a8a, person: 0xffffff },
 };
 
 const gradientGlsl = DEPTH_STOPS.map(([, c]) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`);
@@ -82,29 +82,6 @@ function disposeTree(obj) {
     if (o.material) [].concat(o.material).forEach((m) => { m.map?.dispose(); m.dispose(); });
     if (o.isCSS2DObject) o.element.remove();
   });
-}
-
-// DEPTH's floor: a fine grid every 0.5 m around the scan, with a dot at
-// every metre crossing, like the hologram references.
-function floorGrid(box, pad = 2, step = 0.5) {
-  const x0 = Math.floor((box.min.x - pad) / step) * step;
-  const x1 = Math.ceil((box.max.x + pad) / step) * step;
-  const z0 = Math.floor((box.min.z - pad) / step) * step;
-  const z1 = Math.ceil((box.max.z + pad) / step) * step;
-  const y = 0.002;
-  const lines = [];
-  for (let x = x0; x <= x1 + 1e-6; x += step) lines.push(x, y, z0, x, y, z1);
-  for (let z = z0; z <= z1 + 1e-6; z += step) lines.push(x0, y, z, x1, y, z);
-  const grid = lineSegments(lines, null, 0.1);
-  const dots = [];
-  for (let x = Math.ceil(x0); x <= x1; x += 1) for (let z = Math.ceil(z0); z <= z1; z += 1) dots.push(x, y, z);
-  const points = new THREE.Points(
-    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(dots, 3)),
-    new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0.45, depthWrite: false }),
-  );
-  const g = new THREE.Group();
-  g.add(grid, points);
-  return g;
 }
 
 function label(text, cls) {
@@ -378,15 +355,17 @@ export class AdminScene {
     const tmpC = new THREE.Color();
     for (const room of rooms) {
       const openings = room.openings ?? [];
-      // Floor slab with glowing outline and a hairline "curtain" down to the ground frame.
+      // Floor slab (not in DEPTH, which has no floor) with a glowing outline.
       if (room.floor?.length >= 3) {
-        const shape = new THREE.Shape(room.floor.map(([x, z]) => new THREE.Vector2(x, -z)));
-        const slab = new THREE.Mesh(
-          new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2),
-          new THREE.MeshBasicMaterial({ color: look.floor, transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
-        );
-        slab.position.y = 0.005;
-        this.mapGroup.add(slab);
+        if (look.floor != null) {
+          const shape = new THREE.Shape(room.floor.map(([x, z]) => new THREE.Vector2(x, -z)));
+          const slab = new THREE.Mesh(
+            new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2),
+            new THREE.MeshBasicMaterial({ color: look.floor, transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+          );
+          slab.position.y = 0.005;
+          this.mapGroup.add(slab);
+        }
         const outline = [];
         room.floor.forEach(([x, z], i) => {
           const [nx, nz] = room.floor[(i + 1) % room.floor.length];
@@ -476,7 +455,6 @@ export class AdminScene {
     }
 
     if (map.plan?.placement) this.addPlan(map.plan, grow, look);
-    if (look.grid && !box.isEmpty()) this.mapGroup.add(floorGrid(box));
 
     if (map.origin) {
       const o = cross(ORIGIN_RED, 0.7, 1.2);
