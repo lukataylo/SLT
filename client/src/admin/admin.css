@@ -22,7 +22,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #stage .labels { position: absolute; inset: 0; }
 .label { font: 700 10px var(--mono); letter-spacing: 0.14em; white-space: nowrap; pointer-events: none;
   padding: 3px 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); }
-.label.device { color: var(--lime); border: 1px solid rgba(200, 255, 58, 0.45); }
+.label.device { color: var(--lime); border: 1px solid rgba(200, 255, 58, 0.45);
+  /* Beside the person's dot, not on it: the 3D renderer centres a label on its
+     point with transform; the separate translate moves it to the right. */
+  translate: calc(50% + 14px) 0; }
 .label.device.dim { opacity: 0.35; }
 .label.room { color: #9dfcd0; border: 1px solid rgba(157, 252, 208, 0.3); font-weight: 400; }
 .label.origin { color: #fff; background: var(--red); }

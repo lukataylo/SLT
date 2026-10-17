@@ -621,7 +621,10 @@ export class AdminScene {
       new THREE.MeshBasicMaterial({ map: photoTex, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }),
     );
     photo.visible = false;
+    // The name tag sits beside the person's dot on the floor (admin.css
+    // shifts it to the right on screen), not up by the floating tile.
     const lab = label(d.name.toUpperCase(), 'device');
+    lab.position.y = 0.05;
     // People are always drawn on top: never hidden by walls or the scan.
     for (const o of [photo, tile, beam, spot, cone]) {
       o.material.depthTest = false;
@@ -728,7 +731,6 @@ export class AdminScene {
       m.beam.material.color.set(sel ? ORIGIN_RED : TILE_GREEN);
       m.tile.scale.setScalar(sel ? 1.35 : 1);
       m.photo.scale.setScalar(sel ? 1.35 : 1);
-      m.label.position.y = tileY + 0.45;
       for (const o of [m.tile, m.beam, m.spot, m.cone]) {
         o.material.opacity = (o === m.cone ? 0.22 : o === m.spot ? 0.85 : 0.95) * m.dim;
       }
