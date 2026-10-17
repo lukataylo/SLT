@@ -34,7 +34,7 @@ function setup() {
 
 test('joining sends a welcome with existing peers and announces the newcomer', () => {
   const { a, b, idA, idB } = setup();
-  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 1, origin: null, plan: null, rooms: [], walls: [], seen: [] } });
+  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 1, origin: null, plan: null, rooms: [], walls: [], seen: [], doorways: [] } });
   assert.equal(b.json[0].peers[0].id, idA);
   assert.deepEqual(a.json[1], { t: 'join', id: idB, name: 'Ben' });
 });

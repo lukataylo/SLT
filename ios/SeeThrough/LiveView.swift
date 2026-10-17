@@ -149,6 +149,8 @@ struct LiveView: View {
     private func radarDisc(_ all: [Other], size: CGFloat = 210) -> some View {
         let walls = relay.allWalls
         let uploadedPlan = relay.plan
+        let doorways = relay.doorways
+        let floors = relay.rooms.map(\.floor)
         let openings = relay.rooms.flatMap(\.openings)
         let me = capture.localMark.map { relay.alignment.transform.apply($0) }
         let marks = relay.peerMarks
@@ -191,6 +193,17 @@ struct LiveView: View {
             for o in openings {
                 var p = Path(); p.move(to: pt(o.a.x, o.a.y)); p.addLine(to: pt(o.b.x, o.b.y))
                 ctx.stroke(p, with: .color(o.kind == "door" ? Theme.red : .white.opacity(0.4)), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+            }
+            for d in doorways {
+                if d.open {
+                    let sym = d.symbol(floors: floors)
+                    var arc = Path(); arc.move(to: pt(sym.leaf[1].x, sym.leaf[1].y)); arc.addLine(to: pt(sym.leaf[0].x, sym.leaf[0].y))
+                    arc.move(to: pt(sym.arc[0].x, sym.arc[0].y)); sym.arc.dropFirst().forEach { arc.addLine(to: pt($0.x, $0.y)) }
+                    ctx.stroke(arc, with: .color(Theme.red.opacity(0.85)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                } else {
+                    var bar = Path(); bar.move(to: pt(d.a.x, d.a.y)); bar.addLine(to: pt(d.b.x, d.b.y))
+                    ctx.stroke(bar, with: .color(Theme.red), style: StrokeStyle(lineWidth: 3.5))
+                }
             }
             func cone(at p: CGPoint, yaw: Float, colour: Color, length: CGFloat) {
                 let d = dir(yaw), a = atan2(d.dy, d.dx), half = 0.5

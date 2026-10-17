@@ -100,6 +100,18 @@ enum FloorGeometry {
         return Array(lower.dropLast() + upper.dropLast())
     }
 
+    static func contains(_ polygon: [SIMD2<Float>], _ p: SIMD2<Float>) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var j = polygon.count - 1
+        for i in polygon.indices {
+            let pi = polygon[i], pj = polygon[j]
+            if (pi.y > p.y) != (pj.y > p.y), p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x { inside.toggle() }
+            j = i
+        }
+        return inside
+    }
+
     /// Nearest wall within `maxDist` of a floor point, with the point's
     /// position along it.
     static func nearestWall(_ p: SIMD2<Float>, in walls: [WallSegment], maxDist: Float = 0.35) -> (index: Int, t: Float)? {
@@ -118,5 +130,32 @@ enum FloorGeometry {
             }
         }
         return best
+    }
+}
+
+/// A door-sized gap in a wall: an open door, or a closed one where a door
+/// surface was scanned in the gap (found by the server).
+struct Doorway: Equatable {
+    var a: SIMD2<Float>
+    var b: SIMD2<Float>
+    var open: Bool
+
+    /// The architectural symbol in map coordinates: the door leaf standing at
+    /// 90° from the hinge (a), and the quarter-circle it sweeps to b. The leaf
+    /// opens into whichever side lies inside a scanned floor.
+    func symbol(floors: [[SIMD2<Float>]]) -> (leaf: [SIMD2<Float>], arc: [SIMD2<Float>]) {
+        let w = simd_distance(a, b)
+        guard w > 0 else { return ([], []) }
+        let u = (b - a) / w
+        var n = SIMD2(-u.y, u.x)
+        let probe = (a + b) / 2 + n * 0.4
+        if !floors.contains(where: { FloorGeometry.contains($0, probe) }) && floors.contains(where: { FloorGeometry.contains($0, (a + b) / 2 - n * 0.4) }) {
+            n = -n
+        }
+        let arc = (0...12).map { i -> SIMD2<Float> in
+            let t = Float(i) / 12 * .pi / 2
+            return a + (u * cos(t) + n * sin(t)) * w
+        }
+        return ([a, a + n * w], arc)
     }
 }

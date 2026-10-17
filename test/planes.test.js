@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Quaternion, Vector3 } from 'three';
-import { mergeSegments, reinforce, register, transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
+import { findDoorways, mergeSegments, reinforce, register, transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
 
 const DEG = Math.PI / 180;
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} ${a} vs ${b} (±${tol})`);
@@ -162,4 +162,21 @@ test('reinforce counts each session once and resists a single noisy pass', () =>
   assert.equal(nudged[0].seen, 11);
   assert.ok(Math.abs(nudged[0].s[1]) < 0.03, `moved to ${nudged[0].s[1]}`);
   assert.equal(reinforce(base, [[0, 3, 4, 3]]).length, 2, 'a new wall is added, not merged');
+});
+
+test('findDoorways: door-sized gaps in a wall line are open doors; a scanned door surface makes one closed', () => {
+  const walls = [
+    [0, 0, 3, 0], [3.9, 0, 7, 0], // 0.9 m gap: a doorway
+    [0, 4, 2, 4], [5, 4, 7, 4], // 3 m gap: too wide to be a door
+    [0, 0, 0, 4], [7, 0, 7, 1.2], [7, 1.5, 7, 4], // 0.3 m gap: too narrow
+  ];
+  const found = findDoorways(walls);
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0], { s: [3, 0, 3.9, 0], width: 0.9, state: 'open' });
+
+  const closed = findDoorways(walls, [[3.05, 0.02, 3.85, 0.02]]);
+  assert.equal(closed[0].state, 'closed');
+
+  // A piece of wall across the gap (scanned later) means it isn't a doorway.
+  assert.equal(findDoorways([...walls, [2.8, 0.05, 4.1, 0.05]]).length, 0);
 });

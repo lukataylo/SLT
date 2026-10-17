@@ -430,3 +430,43 @@ export function polygonWalls(polygons) {
   }
   return mergeSegments(segs, { distTol: 0.15, gapTol: 0.1 });
 }
+
+// --- Doorways ---------------------------------------------------------------
+//
+// LiDAR sees an open door as a gap in a wall: two pieces of the same wall
+// line with a door-sized space between them. A gap that a scanned door
+// surface covers is a closed door; otherwise it's open.
+
+const DOOR_MIN = 0.55; // metres
+const DOOR_MAX = 1.8;
+
+export function findDoorways(walls, doorOpenings = []) {
+  const out = [];
+  const segs = walls.filter(isValidSegment);
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const [ref, other] = segLength(segs[i]) >= segLength(segs[j]) ? [segs[i], segs[j]] : [segs[j], segs[i]];
+      if (angleDiff(segAngle(ref), segAngle(other), Math.PI) > 8 * DEG) continue;
+      const ang = segAngle(ref);
+      const u = [Math.cos(ang), Math.sin(ang)];
+      const n = [-u[1], u[0]];
+      const o = [ref[0], ref[1]];
+      const along = (x, z) => (x - o[0]) * u[0] + (z - o[1]) * u[1];
+      const across = (x, z) => Math.abs((x - o[0]) * n[0] + (z - o[1]) * n[1]);
+      if (across(other[0], other[1]) > 0.15 || across(other[2], other[3]) > 0.15) continue;
+      const r = [along(ref[0], ref[1]), along(ref[2], ref[3])].sort((p, q) => p - q);
+      const s = [along(other[0], other[1]), along(other[2], other[3])].sort((p, q) => p - q);
+      const [g0, g1] = s[0] >= r[1] ? [r[1], s[0]] : r[0] >= s[1] ? [s[1], r[0]] : [0, 0];
+      const width = g1 - g0;
+      if (width < DOOR_MIN || width > DOOR_MAX) continue;
+      const seg = [o[0] + u[0] * g0, o[1] + u[1] * g0, o[0] + u[0] * g1, o[1] + u[1] * g1];
+      // A third piece of wall lying across the gap means it isn't a gap.
+      const mid = [(seg[0] + seg[2]) / 2, (seg[1] + seg[3]) / 2];
+      const bridged = segs.some((w) => w !== ref && w !== other && pointSegDist(mid[0], mid[1], w) < 0.15);
+      if (bridged || out.some((d) => Math.hypot((d.s[0] + d.s[2]) / 2 - mid[0], (d.s[1] + d.s[3]) / 2 - mid[1]) < 0.3)) continue;
+      const closed = doorOpenings.some((d) => pointSegDist(mid[0], mid[1], d) < 0.4);
+      out.push({ s: seg.map((v) => Math.round(v * 1000) / 1000), width: Math.round(width * 100) / 100, state: closed ? 'closed' : 'open' });
+    }
+  }
+  return out;
+}

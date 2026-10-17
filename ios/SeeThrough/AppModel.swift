@@ -341,6 +341,7 @@ final class AppModel: ObservableObject {
         case "code": mode = .group; sheet = .showCode
         case "scan", "locate": roomIntent = RoomIntent(existingId: "r1", name: "Living", planRoomId: "pr1"); mode = .scan
         case "pairscan": mode = .pairScan; scanState = .reading("abc")
+        case "floorplan": mode = .floorplan
         default: mode = .group
         }
     }

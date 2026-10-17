@@ -77,6 +77,8 @@ final class RelayClient: ObservableObject {
     @Published private(set) var rooms: [MapRoom] = []
     @Published private(set) var roomId: String?
     @Published private(set) var plan: PlanInfo?
+    /// Door-sized gaps in the map's walls: open (or closed) doors.
+    @Published private(set) var doorways: [Doorway] = []
     /// Who founded the map's fixed origin, once there is one.
     @Published private(set) var originFoundedBy: String?
     /// Other phones on the floor plan, by peer id.
@@ -460,6 +462,10 @@ final class RelayClient: ObservableObject {
         originFoundedBy = (map["origin"] as? [String: Any])?["by"] as? String
         originAt = (map["origin"] as? [String: Any])?["at"] as? String
         rooms = (map["rooms"] as? [[String: Any]] ?? []).compactMap(Self.room)
+        doorways = (map["doorways"] as? [[String: Any]] ?? []).compactMap { d in
+            guard let s = Self.segment(d["s"]) else { return nil }
+            return Doorway(a: s.0, b: s.1, open: (d["state"] as? String) != "closed")
+        }
         plan = (map["plan"] as? [String: Any]).flatMap(Self.plan)
         loadPlanImage()
     }
@@ -567,6 +573,7 @@ extension RelayClient {
             }
         }
         roomId = located ? "r1" : nil
+        doorways = [Doorway(a: SIMD2(5, 1.2), b: SIMD2(5, 2.1), open: true), Doorway(a: SIMD2(3, 4.5), b: SIMD2(4, 4.5), open: false)]
         alignment = Alignment(aligned: located, method: located ? "walls" : nil, match: 0.92, ambiguous: false, needsFloor: false,
                               transform: FloorTransform(ty: 1.4))
         peerMarks = ["p2": Mark(x: 7, z: 1.5, yaw: 1.2), "p3": Mark(x: 2, z: 6, yaw: -0.4)]

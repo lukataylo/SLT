@@ -1,4 +1,4 @@
-import { convexHull, fuseSegments, invert, polygonWalls, reinforce, register, sameWall, segLength, transformSegment } from '../shared/planes.js';
+import { convexHull, findDoorways, fuseSegments, invert, polygonWalls, reinforce, register, sameWall, segLength, transformSegment } from '../shared/planes.js';
 
 // Walls confirmed by at least this many scan sessions anchor alignment, once
 // there are enough of them to align against.
@@ -292,13 +292,18 @@ export class LiveMap {
         cloudPoints: room.cloud.size,
       };
     });
+    const walls = rooms.flatMap((r) => r.walls);
+    const doors = rooms.flatMap((r) => r.openings.filter((o) => o.kind === 'door').map((o) => o.s));
     return {
       version: this.version,
       origin: this.origin,
       plan: this.plan,
       rooms,
-      walls: rooms.flatMap((r) => r.walls),
+      walls,
       seen: rooms.flatMap((r) => r.seen),
+      // Door-sized gaps between pieces of the same wall: open doors (or closed
+      // ones where a door surface was scanned in the gap).
+      doorways: findDoorways(walls, doors),
     };
   }
 

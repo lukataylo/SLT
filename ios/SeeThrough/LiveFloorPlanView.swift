@@ -53,7 +53,7 @@ struct LiveFloorPlanView: View {
                         .font(.system(size: 14)).foregroundStyle(Theme.muted)
                     HStack(spacing: 0) {
                         stat("\(walls.count)", "Walls")
-                        stat("\(openingCount("door"))", "Doors")
+                        stat("\(openingCount("door") + relay.doorways.count)", "Doors")
                         stat("\(openingCount("window"))", "Windows")
                         stat(String(format: "%.0f", area), "m² floor")
                     }
@@ -95,6 +95,7 @@ struct LiveFloorPlanView: View {
         let shared = walls, live = liveWalls, me = me
         let openings = relay.rooms.flatMap(\.openings)
         let floors = relay.rooms.map(\.floor)
+        let doorways = relay.doorways
         let others = relay.peerMarks
         return Canvas { ctx, size in
             var xs: [Float] = shared.flatMap { [$0.a.x, $0.b.x] } + live.flatMap { [$0.a.x, $0.b.x] }
@@ -133,6 +134,20 @@ struct LiveFloorPlanView: View {
             for o in openings {
                 var p = Path(); p.move(to: pt(o.a.x, o.a.y)); p.addLine(to: pt(o.b.x, o.b.y))
                 ctx.stroke(p, with: .color(o.kind == "door" ? Theme.red : .white.opacity(0.45)), style: StrokeStyle(lineWidth: 6, lineCap: .butt))
+            }
+            // Doorways: open doors as leaf + swing, closed ones as a solid bar.
+            for d in doorways {
+                if d.open {
+                    let sym = d.symbol(floors: floors)
+                    var leaf = Path(); leaf.move(to: pt(sym.leaf[0].x, sym.leaf[0].y)); leaf.addLine(to: pt(sym.leaf[1].x, sym.leaf[1].y))
+                    var arc = Path(); arc.move(to: pt(sym.arc[0].x, sym.arc[0].y))
+                    sym.arc.dropFirst().forEach { arc.addLine(to: pt($0.x, $0.y)) }
+                    ctx.stroke(leaf, with: .color(Theme.red), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    ctx.stroke(arc, with: .color(Theme.red.opacity(0.8)), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                } else {
+                    var bar = Path(); bar.move(to: pt(d.a.x, d.a.y)); bar.addLine(to: pt(d.b.x, d.b.y))
+                    ctx.stroke(bar, with: .color(Theme.red), style: StrokeStyle(lineWidth: 6))
+                }
             }
             func phone(_ m: Mark, _ colour: Color) {
                 let p = pt(m.x, m.z), d = CGPoint(x: -CGFloat(sin(m.yaw)), y: -CGFloat(cos(m.yaw)))
@@ -175,6 +190,22 @@ struct LiveFloorPlanView: View {
                 (o.kind == "door" ? UIColor(red: 0.84, green: 0.1, blue: 0.13, alpha: 1) : UIColor(white: 0.6, alpha: 1)).setStroke()
                 c.setLineWidth(8)
                 c.move(to: px(o.a.x, o.a.y)); c.addLine(to: px(o.b.x, o.b.y)); c.strokePath()
+            }
+            let floors = relay.rooms.map(\.floor)
+            for d in relay.doorways {
+                UIColor(red: 0.84, green: 0.1, blue: 0.13, alpha: 1).setStroke()
+                if d.open {
+                    let sym = d.symbol(floors: floors)
+                    c.setLineWidth(4)
+                    c.move(to: px(sym.leaf[0].x, sym.leaf[0].y)); c.addLine(to: px(sym.leaf[1].x, sym.leaf[1].y)); c.strokePath()
+                    c.setLineWidth(2)
+                    c.move(to: px(sym.arc[0].x, sym.arc[0].y))
+                    for p in sym.arc.dropFirst() { c.addLine(to: px(p.x, p.y)) }
+                    c.strokePath()
+                } else {
+                    c.setLineWidth(8)
+                    c.move(to: px(d.a.x, d.a.y)); c.addLine(to: px(d.b.x, d.b.y)); c.strokePath()
+                }
             }
             for room in relay.rooms where room.floor.count >= 3 {
                 let centre = room.floor.reduce(SIMD2<Float>.zero, +) / Float(room.floor.count)
