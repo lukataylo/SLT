@@ -66,10 +66,11 @@ function canMerge(a, b, { angleTol, distTol, gapTol }) {
   return Math.max(s[0] - r[1], r[0] - s[1]) < gapTol;
 }
 
-// Length-weighted best-fit line through both segments, spanning their union.
-function fuse(a, b) {
-  const la = segLength(a);
-  const lb = segLength(b);
+// Weighted best-fit line through both segments, spanning their union. Weights
+// default to length; reinforcement passes heavier weights for confirmed walls.
+function fuse(a, b, wa = segLength(a), wb = segLength(b)) {
+  const la = wa;
+  const lb = wb;
   // Average directions on the doubled angle so opposite-facing segments agree.
   const sa = 2 * segAngle(a);
   const sb = 2 * segAngle(b);
@@ -108,6 +109,52 @@ export function mergeSegments(segments, { angleTol = 10 * DEG, distTol = 0.25, g
     }
   }
   return out;
+}
+
+// --- Reinforcement: walls confirmed by repeated scans ----------------------
+//
+// Map walls are { s: [x1, z1, x2, z2], seen } where `seen` counts the separate
+// scan sessions that observed the wall. A session that sees a wall again bumps
+// `seen` once and nudges its position, weighted so one pass can't drag a wall
+// that many sessions agree on.
+
+const MAX_SEEN_WEIGHT = 20;
+
+export function reinforce(base, observed, opts = {}) {
+  const tol = { angleTol: 10 * DEG, distTol: 0.25, gapTol: 0.5, ...opts };
+  const walls = base.map((w) => ({ s: [...w.s], seen: w.seen }));
+  const confirmed = new Set();
+  for (const seg of mergeSegments(observed, opts)) {
+    const hit = walls.findIndex((w) => canMerge(w.s, seg, tol));
+    if (hit < 0) {
+      walls.push({ s: seg, seen: 1 });
+      continue;
+    }
+    const w = walls[hit];
+    w.s = fuse(w.s, seg, segLength(w.s) * Math.min(w.seen, MAX_SEEN_WEIGHT), segLength(seg));
+    if (!confirmed.has(w)) {
+      confirmed.add(w);
+      w.seen += 1;
+    }
+  }
+  // Grown walls can now overlap each other; fold them together, keeping the
+  // stronger count (they describe the same evidence, so don't add them).
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < walls.length && !changed; i++) {
+      for (let j = i + 1; j < walls.length; j++) {
+        if (!canMerge(walls[i].s, walls[j].s, tol)) continue;
+        const [a, b] = [walls[i], walls[j]];
+        a.s = fuse(a.s, b.s, segLength(a.s) * Math.min(a.seen, MAX_SEEN_WEIGHT), segLength(b.s) * Math.min(b.seen, MAX_SEEN_WEIGHT));
+        a.seen = Math.max(a.seen, b.seen);
+        walls.splice(j, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return walls;
 }
 
 // --- Registration: where is this phone's floor plan within the map? --------
@@ -242,6 +289,8 @@ function offsetPeaks(votes, bin = 0.1, k = 4) {
   return peaks;
 }
 
+const MIN_DECISIVE_LENGTH = 1; // metres
+
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
@@ -311,9 +360,11 @@ export function register(local, map, { initial = null, step = 0.2, inlierDist = 
   const [best, ...rest] = scored;
   // A symmetric room fits several placements equally well; report that rather
   // than guess, so the phone can keep scanning until something breaks the tie.
+  // Judge by metres of wall that only the best placement explains: a single
+  // interior wall is enough to tell an otherwise symmetric room apart.
   const ambiguous = rest.some(
     (r) =>
-      r.inlierFraction >= best.inlierFraction * 0.9 &&
+      best.inlierLength - r.inlierLength < MIN_DECISIVE_LENGTH &&
       (angleDiff(r.T.yaw, best.T.yaw, 2 * Math.PI) > 10 * DEG ||
         Math.hypot(r.T.t[0] - best.T.t[0], r.T.t[2] - best.T.t[2]) > 0.5),
   );

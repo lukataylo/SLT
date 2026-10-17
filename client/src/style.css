@@ -55,7 +55,7 @@ body.xray #camera { visibility: visible; }
 
 /* --- Minimap ----------------------------------------------------------- */
 #mapPanel {
-  position: fixed; right: 16px; top: calc(env(safe-area-inset-top) + 84px); width: min(40vw, 220px);
+  position: fixed; right: 16px; top: calc(env(safe-area-inset-top) + 84px); width: min(46vw, 280px);
   background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 10px;
   backdrop-filter: blur(12px);
 }
@@ -64,6 +64,7 @@ body.xray #camera { visibility: visible; }
   font: 400 9px var(--mono); letter-spacing: 0.14em; color: var(--muted);
 }
 #minimap { width: 100%; display: block; border-radius: 12px; background: var(--dots), #050505; cursor: crosshair; }
+#minimap.pending { outline: 1px dashed var(--red); outline-offset: 2px; }
 #hint { margin: 8px 2px 0; font: 700 10px/1.3 var(--mono); letter-spacing: 0.08em; color: var(--red); text-transform: uppercase; }
 #hint:empty { display: none; }
 

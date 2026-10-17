@@ -1,4 +1,4 @@
-import { createReadStream, readFileSync } from 'node:fs';
+import { createReadStream, readFileSync, writeFileSync } from 'node:fs';
 import { stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
@@ -13,24 +13,43 @@ const STATIC_DIR = path.resolve(fileURLToPath(new URL('../dist', import.meta.url
 const recorder = process.env.RECORD_DIR ? new Recorder(process.env.RECORD_DIR) : null;
 const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE) });
 
-// The floor plan survives restarts when MAP_FILE points at a persistent volume.
+// The floor plan and its fixed origin survive restarts when MAP_FILE points at
+// a persistent volume. Only committed scan sessions are saved.
 function loadMap(file) {
   if (!file) return new LiveMap();
-  let base = [];
+  let saved = {};
   try {
-    base = JSON.parse(readFileSync(file, 'utf8')).walls ?? [];
+    saved = JSON.parse(readFileSync(file, 'utf8'));
+    console.log(`[map] loaded ${saved.walls?.length ?? 0} walls, origin ${saved.origin ? 'fixed' : 'unset'}`);
   } catch {}
   let timer = null;
   return new LiveMap({
-    base,
+    base: saved.walls ?? [],
+    origin: saved.origin ?? null,
     onChange: (map) => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        writeFile(file, JSON.stringify({ walls: map.base })).catch((err) => console.error('[map] save:', err.message));
+        writeFile(file, JSON.stringify(map.toFile())).catch((err) => console.error('[map] save:', err.message));
       }, 2000);
     },
   });
 }
+
+// Railway stops containers with SIGTERM on redeploy: fold in the sessions of
+// phones still scanning so their reinforcement isn't lost.
+function shutdown() {
+  room.map.commitAll();
+  if (process.env.MAP_FILE) {
+    try {
+      writeFileSync(process.env.MAP_FILE, JSON.stringify(room.map.toFile()));
+    } catch (err) {
+      console.error('[map] save on exit:', err.message);
+    }
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',

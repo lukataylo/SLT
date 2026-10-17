@@ -1,6 +1,6 @@
 import { yawTowards } from './align.js';
 import { Camera } from './camera.js';
-import { Minimap } from './minimap.js';
+import { Minimap } from './minimap3d.js';
 import { Net } from './net.js';
 import { MotionPose } from './pose/motion.js';
 import { SimPose } from './pose/sim.js';
@@ -67,17 +67,19 @@ async function start({ name, mode, share }) {
   });
   // Once LiDAR phones have vectorised real walls, they replace the blockout.
   let hasLiveMap = false;
-  const applyLiveMap = ({ walls }) => {
+  const applyLiveMap = ({ walls, seen, origin }) => {
     if (!walls?.length) return;
-    const xs = walls.flatMap((w) => [w[0], w[2]]);
-    const zs = walls.flatMap((w) => [w[1], w[3]]);
+    // The fixed origin is part of the plan, so keep it in view.
+    const xs = [...walls.flatMap((w) => [w[0], w[2]]), ...(origin ? [0] : [])];
+    const zs = [...walls.flatMap((w) => [w[1], w[3]]), ...(origin ? [0] : [])];
     const bounds = [Math.min(...xs) - 1, Math.min(...zs) - 1, Math.max(...xs) + 1, Math.max(...zs) + 1];
     world.setWalls(walls);
     world.setFloor(bounds);
     // The blockout's start point means nothing in a scanned map's frame.
     if (!hasLiveMap && pose.kind === 'sim') pose.setPosition((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2);
     hasLiveMap = true;
-    minimap.setWalls(walls);
+    minimap.setWalls(walls, seen);
+    minimap.setOrigin(!!origin);
     minimap.setBounds(bounds);
   };
   net.addEventListener('map', ({ detail }) => applyLiveMap(detail));
@@ -188,7 +190,7 @@ async function start({ name, mode, share }) {
 
     const list = [...peers.entries()].map(([id, p]) => {
       const card = world.peers.get(id);
-      return { ...p, live: card && now - card.lastFrameAt < 3000 };
+      return { ...p, id, live: card && now - card.lastFrameAt < 3000 };
     });
     const live = list.filter((p) => p.live).length;
     const pad = (n) => String(n).padStart(2, '0');

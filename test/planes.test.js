@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Quaternion, Vector3 } from 'three';
-import { mergeSegments, register, transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
+import { mergeSegments, reinforce, register, transformPoint2, transformPose, transformSegment } from '../shared/planes.js';
 
 const DEG = Math.PI / 180;
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} ${a} vs ${b} (±${tol})`);
@@ -151,4 +151,15 @@ test('register tolerates clutter that is not in the map', () => {
   near(wrap(res.yaw - truth.yaw), 0, 2 * DEG, 'yaw');
   near(res.t[0], truth.t[0], 0.15, 'tx');
   near(res.t[2], truth.t[2], 0.15, 'tz');
+});
+
+test('reinforce counts each session once and resists a single noisy pass', () => {
+  let base = reinforce([], [[0, 0, 4, 0]]);
+  for (let i = 0; i < 9; i++) base = reinforce(base, [[0, 0, 4, 0], [0.5, 0.02, 3, 0.02]]);
+  assert.equal(base.length, 1);
+  assert.equal(base[0].seen, 10);
+  const nudged = reinforce(base, [[0, 0.2, 4, 0.2]]);
+  assert.equal(nudged[0].seen, 11);
+  assert.ok(Math.abs(nudged[0].s[1]) < 0.03, `moved to ${nudged[0].s[1]}`);
+  assert.equal(reinforce(base, [[0, 3, 4, 3]]).length, 2, 'a new wall is added, not merged');
 });

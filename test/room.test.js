@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { transformSegment } from '../shared/planes.js';
 import { decodeFrame, encodeFrame } from '../shared/protocol.js';
+import { LiveMap } from '../server/livemap.js';
 import { MAX_BUFFERED_BYTES, Room } from '../server/room.js';
 
 class FakeSocket {
@@ -33,7 +34,7 @@ function setup() {
 
 test('joining sends a welcome with existing peers and announces the newcomer', () => {
   const { a, b, idA, idB } = setup();
-  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 0, walls: [] } });
+  assert.deepEqual(a.json[0], { t: 'welcome', id: idA, name: 'Ana', peers: [], map: { version: 0, origin: null, walls: [], seen: [] } });
   assert.equal(b.json[0].peers[0].id, idA);
   assert.deepEqual(a.json[1], { t: 'join', id: idB, name: 'Ben' });
 });
@@ -177,4 +178,71 @@ test('browser peers cannot send planes', () => {
   const { room, idA } = setup();
   room.handleText(idA, planes(ROOM));
   assert.equal(room.map.walls.length, 0);
+});
+
+// --- Fixed origin and reinforcement ----------------------------------------
+
+test('the origin is founded once and survives a restart', () => {
+  const first = new Room({ now: () => 1000 });
+  const idA = first.join(new FakeSocket(), { name: 'Founder', frame: 'local' });
+  first.handleText(idA, planes(ROOM));
+  first.leave(idA);
+  const saved = JSON.parse(JSON.stringify(first.map.toFile()));
+  assert.equal(saved.origin.by, 'Founder');
+
+  // After a restart, a phone that starts elsewhere must align to the saved
+  // origin instead of founding a new one.
+  const room = new Room({ map: new LiveMap({ base: saved.walls, origin: saved.origin }) });
+  const inv = { yaw: -Math.PI / 2, t: [-1, 0, -3] };
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'Later', frame: 'local' });
+  room.handleText(id, planes([ROOM[0], ROOM[1], ROOM[4]].map((s) => transformSegment(s, inv))));
+  const align = last(phone, 'align');
+  assert.equal(align.method, 'walls');
+  assert.equal(align.origin.by, 'Founder');
+  assert.ok(Math.abs(align.alignment.yaw - Math.PI / 2) < 0.02);
+});
+
+test('a phone with no walls yet does not found the origin', () => {
+  const room = new Room();
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, planes([]));
+  assert.equal(room.map.origin, null);
+  assert.equal(last(phone, 'align').aligned, false);
+});
+
+test('walls confirmed by more sessions gain weight', () => {
+  const room = new Room();
+  for (const name of ['A', 'B', 'C']) {
+    const id = room.join(new FakeSocket(), { name, frame: 'local' });
+    room.handleText(id, planes(ROOM));
+    room.leave(id);
+  }
+  assert.deepEqual(room.map.toJSON().seen, ROOM.map(() => 3));
+});
+
+test('placed phones take small blended corrections and resist one-off jumps', () => {
+  const room = new Room();
+  const idA = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(idA, planes(ROOM));
+  const phone = new FakeSocket();
+  const id = room.join(phone, { name: 'B', frame: 'local' });
+  room.handleText(id, planes(ROOM));
+  assert.equal(last(phone, 'align').correction, 'locked');
+
+  // Tracking drift of 0.2 m: corrected halfway per update.
+  const drift = ROOM.map((s) => transformSegment(s, { yaw: 0, t: [-0.2, 0, 0] }));
+  room.handleText(id, planes(drift));
+  assert.equal(last(phone, 'align').correction, 'refined');
+  assert.ok(Math.abs(last(phone, 'align').alignment.t[0] - 0.1) < 0.02);
+
+  // A sudden 2 m jump is held until it repeats.
+  const jump = ROOM.map((s) => transformSegment(s, { yaw: 0, t: [-2, 0, 0] }));
+  room.handleText(id, planes(jump));
+  assert.equal(last(phone, 'align').correction, 'held');
+  room.handleText(id, planes(jump));
+  room.handleText(id, planes(jump));
+  assert.equal(last(phone, 'align').correction, 'relocated');
+  assert.ok(Math.abs(last(phone, 'align').alignment.t[0] - 2) < 0.05);
 });

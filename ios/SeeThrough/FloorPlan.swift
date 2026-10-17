@@ -38,13 +38,13 @@ struct FloorTransform: Equatable {
     }
 }
 
-private let red = Color(red: 0.843, green: 0.098, blue: 0.129)
-
-/// Top-down live floor plan, redrawn as LiDAR walls are vectorised.
+/// The live floor-plan card: a 3D preview of the walls as LiDAR vectorises them.
 struct FloorPlanView: View {
     var walls: [[Float]]
+    var seen: [Int] = []
     var me: Mark?
     var peers: [Mark]
+    var origin: FloorPlanScene.Origin?
     var title: String
 
     var body: some View {
@@ -54,71 +54,17 @@ struct FloorPlanView: View {
                 Spacer()
                 Text("\(walls.count) WALLS").font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
             }
-            Canvas { ctx, size in draw(in: &ctx, size: size) }
-                .background(Color(white: 0.02))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+            ZStack {
+                FloorPlanScene(walls: walls, seen: seen, me: me, peers: peers, origin: origin)
+                if walls.isEmpty {
+                    Text("SWEEP ACROSS A WALL").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.gray)
+                }
+            }
+            .background(Color(white: 0.02))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 22).fill(.black.opacity(0.78)))
         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.14)))
-    }
-
-    private func draw(in ctx: inout GraphicsContext, size: CGSize) {
-        // Dot-grid backdrop.
-        let pitch: CGFloat = 12
-        var y = pitch / 2
-        while y < size.height {
-            var x = pitch / 2
-            while x < size.width {
-                ctx.fill(Path(ellipseIn: CGRect(x: x - 0.7, y: y - 0.7, width: 1.4, height: 1.4)), with: .color(.white.opacity(0.13)))
-                x += pitch
-            }
-            y += pitch
-        }
-
-        // Fit everything seen so far, at least 4 m across, with a 1 m margin.
-        var xs = walls.flatMap { [$0[0], $0[2]] }
-        var zs = walls.flatMap { [$0[1], $0[3]] }
-        for m in peers + (me.map { [$0] } ?? []) {
-            xs.append(m.x)
-            zs.append(m.z)
-        }
-        guard let minX = xs.min(), let maxX = xs.max(), let minZ = zs.min(), let maxZ = zs.max() else {
-            ctx.draw(Text("SWEEP ACROSS A WALL").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundColor(.gray),
-                     at: CGPoint(x: size.width / 2, y: size.height / 2))
-            return
-        }
-        let spanX = max(maxX - minX, 4) + 2
-        let spanZ = max(maxZ - minZ, 4) + 2
-        let scale = CGFloat(min(Float(size.width) / spanX, Float(size.height) / spanZ))
-        let cx = (minX + maxX) / 2
-        let cz = (minZ + maxZ) / 2
-        func pt(_ x: Float, _ z: Float) -> CGPoint {
-            CGPoint(x: size.width / 2 + CGFloat(x - cx) * scale, y: size.height / 2 + CGFloat(z - cz) * scale)
-        }
-
-        var wallPath = Path()
-        for w in walls {
-            wallPath.move(to: pt(w[0], w[1]))
-            wallPath.addLine(to: pt(w[2], w[3]))
-        }
-        ctx.stroke(wallPath, with: .color(.white), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, dash: [0.1, 5]))
-
-        func phone(_ m: Mark, color: Color) {
-            let p = pt(m.x, m.z)
-            // Forward on screen is (-sin yaw, -cos yaw): x right, z down.
-            let heading = CGFloat(atan2(-cos(m.yaw), -sin(m.yaw)))
-            var cone = Path()
-            cone.move(to: p)
-            for i in 0...8 {
-                let a = heading - 0.45 + 0.9 * CGFloat(i) / 8
-                cone.addLine(to: CGPoint(x: p.x + 26 * cos(a), y: p.y + 26 * sin(a)))
-            }
-            cone.closeSubpath()
-            ctx.fill(cone, with: .color(color.opacity(0.3)))
-            ctx.fill(Path(ellipseIn: CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)), with: .color(color))
-        }
-        for m in peers { phone(m, color: .white) }
-        if let me { phone(me, color: red) }
     }
 }

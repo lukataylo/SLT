@@ -11,6 +11,10 @@ export const MAX_WALLS_PER_PEER = 300;
 // How sure registration must be before a phone's poses are trusted in the map.
 const MIN_INLIER_FRACTION = 0.6;
 const MIN_INLIER_LENGTH = 2; // metres of wall that agree with the map
+const MAX_STEP_M = 0.5; // largest correction applied to a placed phone at once
+const MAX_STEP_YAW = (5 * Math.PI) / 180;
+const BLEND = 0.5; // move halfway to each new fit, smoothing scan noise
+const JUMP_CONFIRMATIONS = 3;
 
 const OPEN = 1;
 
@@ -88,19 +92,22 @@ export class Room {
   }
 
   alignPeer(peer) {
-    const floor = [0, -(peer.floorY ?? 0), 0];
-    const others = this.map.wallsExcluding(peer.id);
-    const anyoneElseAligned = [...this.peers.values()].some((p) => p !== peer && p.alignment);
+    const floorDy = -(peer.floorY ?? 0);
     let result = null;
-    if (!others.length && !anyoneElseAligned && !peer.alignment) {
-      // First LiDAR phone in an empty map: its frame becomes the map frame.
-      peer.alignment = { yaw: 0, t: floor };
-      result = { method: 'origin' };
-    } else if (others.length) {
-      const fit = register(peer.localWalls, others, { initial: peer.alignment && { ...peer.alignment, t: [...peer.alignment.t] } });
+    const anyoneElseAligned = [...this.peers.values()].some((p) => p !== peer && p.alignment);
+    if (!this.map.origin && !peer.alignment && !anyoneElseAligned) {
+      // No fixed origin yet: this phone's scan founds the map frame. The
+      // origin is saved with the map and never re-founded afterwards.
+      if (!peer.localWalls.length) return this.sendAlign(peer, null);
+      this.map.found({ by: peer.name, at: new Date(this.now()).toISOString() });
+      peer.alignment = { yaw: 0, t: [0, floorDy, 0] };
+      result = { method: 'origin', correction: 'locked' };
+    } else {
+      const anchors = this.map.anchorsFor(peer.id);
+      const fit = anchors.length ? register(peer.localWalls, anchors, { initial: peer.alignment }) : null;
       const good = fit && !fit.ambiguous && fit.inlierFraction >= MIN_INLIER_FRACTION && fit.inlierLength >= MIN_INLIER_LENGTH;
-      if (good) peer.alignment = { yaw: fit.yaw, t: [fit.t[0], floor[1], fit.t[2]] };
-      result = fit ? { method: 'walls', ...fit, accepted: good } : { method: 'walls', accepted: false };
+      const correction = good ? this.correct(peer, { yaw: fit.yaw, t: [fit.t[0], floorDy, fit.t[2]] }) : 'none';
+      result = { method: 'walls', ...fit, correction };
     }
     if (peer.alignment) {
       this.map.setContribution(
@@ -109,13 +116,48 @@ export class Room {
       );
       this.broadcastMap();
     }
+    this.sendAlign(peer, result);
+  }
+
+  // Once placed, a phone only takes small, blended corrections, so map matches
+  // refine its position locally instead of yanking it around. A large jump is
+  // believed only after it repeats consistently (e.g. ARKit relocalised).
+  correct(peer, next) {
+    const cur = peer.alignment;
+    if (!cur) {
+      peer.alignment = next;
+      return 'locked';
+    }
+    const dyaw = Math.atan2(Math.sin(next.yaw - cur.yaw), Math.cos(next.yaw - cur.yaw));
+    const dx = next.t[0] - cur.t[0];
+    const dz = next.t[2] - cur.t[2];
+    if (Math.abs(dyaw) <= MAX_STEP_YAW && Math.hypot(dx, dz) <= MAX_STEP_M) {
+      peer.alignment = { yaw: cur.yaw + dyaw * BLEND, t: [cur.t[0] + dx * BLEND, next.t[1], cur.t[2] + dz * BLEND] };
+      peer.pendingJump = null;
+      return 'refined';
+    }
+    const pending = peer.pendingJump;
+    const same =
+      pending &&
+      Math.abs(Math.atan2(Math.sin(pending.yaw - next.yaw), Math.cos(pending.yaw - next.yaw))) < MAX_STEP_YAW &&
+      Math.hypot(pending.t[0] - next.t[0], pending.t[2] - next.t[2]) < 0.2;
+    peer.pendingJump = same ? { ...next, count: pending.count + 1 } : { ...next, count: 1 };
+    if (peer.pendingJump.count < JUMP_CONFIRMATIONS) return 'held';
+    peer.alignment = next;
+    peer.pendingJump = null;
+    return 'relocated';
+  }
+
+  sendAlign(peer, result) {
     this.sendJson(peer, {
       t: 'align',
       aligned: !!peer.alignment,
       alignment: peer.alignment ?? IDENTITY,
+      origin: this.map.origin,
       walls: peer.localWalls.length,
       ...(result && {
         method: result.method,
+        correction: result.correction,
         inlierFraction: result.inlierFraction,
         rms: Number.isFinite(result.rms) ? result.rms : undefined,
         ambiguous: result.ambiguous,

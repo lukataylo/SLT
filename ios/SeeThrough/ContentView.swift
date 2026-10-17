@@ -66,12 +66,14 @@ struct ContentView: View {
         if relay.alignment.aligned {
             FloorPlanView(
                 walls: relay.mapWalls,
+                seen: relay.mapSeen,
                 me: capture.localMark.map { relay.alignment.transform.apply($0) },
                 peers: Array(relay.peerMarks.values),
-                title: "SHARED MAP · LIVE"
+                origin: relay.originFoundedBy == nil ? nil : .fixed,
+                title: relay.originFoundedBy.map { "SHARED MAP · ORIGIN BY \($0.uppercased())" } ?? "SHARED MAP · LIVE"
             )
         } else {
-            FloorPlanView(walls: capture.localWalls, me: capture.localMark, peers: [], title: "LOCAL SCAN · NOT ALIGNED")
+            FloorPlanView(walls: capture.localWalls, me: capture.localMark, peers: [], origin: .session, title: "LOCAL SCAN · SESSION START")
         }
     }
 
@@ -113,7 +115,7 @@ struct ContentView: View {
     private var alignDetail: String {
         let a = relay.alignment
         if a.aligned {
-            if a.method == "origin" { return "You started the map. Others align to the walls you scan." }
+            if a.method == "origin" { return "You founded the map. Its origin is fixed here and saved; every scan aligns to it." }
             if let match = a.match { return "Locked to the shared floor plan · \(Int(match * 100))% wall match." }
             return "Locked to the shared floor plan."
         }

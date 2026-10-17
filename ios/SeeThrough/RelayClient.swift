@@ -17,6 +17,10 @@ final class RelayClient: ObservableObject {
     @Published private(set) var peers = 0
     /// The shared, vectorised floor plan in map coordinates.
     @Published private(set) var mapWalls: [[Float]] = []
+    /// How many scan sessions confirmed each wall in `mapWalls`.
+    @Published private(set) var mapSeen: [Int] = []
+    /// Who founded the map's fixed origin, once there is one.
+    @Published private(set) var originFoundedBy: String?
     /// Other phones on the floor plan, by peer id.
     @Published private(set) var peerMarks: [String: Mark] = [:]
     @Published private(set) var alignment = Alignment(aligned: false, method: nil, match: nil, ambiguous: false)
@@ -108,15 +112,16 @@ final class RelayClient: ObservableObject {
                     peerMarks[id] = mark
                 }
             }
-            mapWalls = Self.walls((msg["map"] as? [String: Any])?["walls"])
+            applyMap(msg["map"] as? [String: Any] ?? [:])
         case "join": peers += 1
         case "leave":
             peers = max(0, peers - 1)
             if let id = msg["id"] as? String { peerMarks[id] = nil }
         case "pose":
             if let id = msg["id"] as? String, let mark = Self.mark(msg) { peerMarks[id] = mark }
-        case "map": mapWalls = Self.walls(msg["walls"])
+        case "map": applyMap(msg)
         case "align":
+            if let origin = msg["origin"] as? [String: Any] { originFoundedBy = origin["by"] as? String }
             let a = msg["alignment"] as? [String: Any]
             let t = (a?["t"] as? [Double]) ?? [0, 0, 0]
             alignment = Alignment(
@@ -128,6 +133,12 @@ final class RelayClient: ObservableObject {
             )
         default: break
         }
+    }
+
+    private func applyMap(_ map: [String: Any]) {
+        mapWalls = Self.walls(map["walls"])
+        mapSeen = map["seen"] as? [Int] ?? []
+        if let origin = map["origin"] as? [String: Any] { originFoundedBy = origin["by"] as? String }
     }
 
     private static func walls(_ any: Any?) -> [[Float]] {
