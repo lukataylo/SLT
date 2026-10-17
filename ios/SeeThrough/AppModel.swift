@@ -152,9 +152,12 @@ final class AppModel: ObservableObject {
     }
 
     private func applyMode() {
-        // Everyone in Live streams; Move phones also look through to the rest.
-        capture.sendFrames = mode == .live && settings.shareCamera
-        capture.sendCloud = mode == .scan && settings.captureColour
+        // In a group, every phone streams its view so everyone (and the operator)
+        // can see it, and keeps scanning with LiDAR the whole time: walls keep
+        // it aligned, colour points keep growing the 3D map.
+        let inGroup = mode == .group || mode == .live
+        capture.sendFrames = inGroup && settings.shareCamera
+        capture.sendCloud = (inGroup || mode == .scan) && settings.captureColour
         capture.detectQR = mode == .pairScan
         if mode != .pairScan { capture.stopTrackingCodes() }
     }

@@ -1,6 +1,7 @@
 import { decodeFrame } from '../../../shared/protocol.js';
 import { fetchCloudSnapshot } from '../splatcloud.js';
 import { startMock } from './mock.js';
+import { OperatorView } from './operator.js';
 import { AdminScene } from './scene.js';
 
 // Server -> admin contract (over /ws?role=admin):
@@ -9,11 +10,13 @@ import { AdminScene } from './scene.js';
 //   {t:'devices', devices}                            ~5 Hz
 //   {t:'cloud', roomId, points, colors, normals}      append splats (xyz m, rgb 0-255, normal x127)
 //   {t:'cloud-reset', roomId}                         null = all rooms
-//   binary video frames (shared/protocol.js)          <= 2 fps per device
+//   binary video frames (shared/protocol.js)          ~4 fps per device
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const scene = new AdminScene($('stage'));
+const operator = new OperatorView($('operator'));
+let view = 'operator';
 
 const state = { map: null, devices: [], connected: false };
 const pad = (n, w = 2) => String(n).padStart(w, '0');
@@ -55,7 +58,8 @@ function handle(msg) {
   renderStats();
 }
 
-// Latest camera frame per device: texture on its beacon and a list thumbnail.
+// Latest camera frame per device: the operator's video wall, the beacon in
+// the 3D view, and a list thumbnail. Only the visible view decodes its copy.
 const thumbs = new Map();
 const decoding = new Set();
 async function handleFrame(meta, jpeg) {
@@ -63,7 +67,8 @@ async function handleFrame(meta, jpeg) {
   decoding.add(meta.id);
   try {
     const blob = new Blob([jpeg], { type: 'image/jpeg' });
-    scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
+    if (view === 'operator') operator.setFrame(meta, await createImageBitmap(blob));
+    else scene.setDeviceFrame(meta.id, await createImageBitmap(blob, { imageOrientation: 'flipY' }));
     const prev = thumbs.get(meta.id);
     if (prev) URL.revokeObjectURL(prev);
     const url = URL.createObjectURL(blob);
@@ -81,6 +86,7 @@ function setMap(map) {
   if (!map) return;
   state.map = map;
   scene.setMap(map);
+  operator.setMap(map);
   renderRooms();
   renderDevices();
 }
@@ -88,6 +94,7 @@ function setMap(map) {
 function setDevices(devices) {
   state.devices = devices;
   scene.setDevices(devices);
+  operator.setDevices(devices);
   renderDevices();
 }
 
@@ -177,6 +184,24 @@ try {
 } catch {}
 setMode(savedMode === 'colour' ? 'colour' : 'depth');
 
+// OPERATOR (floor plan + every camera) or the 3D bird's-eye view. The 3D
+// scene only renders while it's showing: splats are expensive.
+function setView(next) {
+  view = next === '3d' ? '3d' : 'operator';
+  document.body.dataset.view = view;
+  for (const b of document.querySelectorAll('[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
+  if (view === 'operator') operator.relayout();
+  try {
+    localStorage.setItem('slt.admin.view', view);
+  } catch {}
+}
+for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
+let savedView = null;
+try {
+  savedView = localStorage.getItem('slt.admin.view');
+} catch {}
+setView(params.has('operator') ? 'operator' : savedView ?? 'operator');
+
 for (const tab of document.querySelectorAll('[data-tab]')) {
   tab.addEventListener('click', () => {
     document.body.dataset.tab = tab.dataset.tab;
@@ -232,7 +257,8 @@ renderRooms();
 renderStats();
 
 const loop = (now) => {
-  scene.render(now);
+  if (view === '3d') scene.render(now);
+  else operator.render(now);
   requestAnimationFrame(loop);
 };
 requestAnimationFrame(loop);

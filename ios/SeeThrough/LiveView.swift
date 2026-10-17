@@ -97,10 +97,13 @@ struct LiveView: View {
         HStack {
             IconButton(glyph: .back, label: "Back to the group") { model.mode = .group }
             Spacer()
+            // On a dark backing: the camera behind can be bright.
             VStack(spacing: 2) {
                 Text(String(format: "%02d", count)).font(Theme.display(30))
-                Text("Live").label(8).foregroundStyle(Theme.muted)
+                Text("Live").label(8).foregroundStyle(.white.opacity(0.75))
             }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.panel))
             Spacer()
             Color.clear.frame(width: 46, height: 46)
         }
@@ -141,53 +144,115 @@ struct LiveView: View {
         .accessibilityLabel("\(o.name), \(String(format: "%.0f", o.distance)) metres to your \(left ? "left" : "right")")
     }
 
-    /// Top-down, you in the middle facing up, everyone else around you.
-    private func radarDisc(_ all: [Other]) -> some View {
-        let size: CGFloat = 170
-        let range: Float = 8 // metres to the rim
-        return ZStack {
-            Circle().fill(Theme.panel)
-            Circle().stroke(Theme.line)
-            Circle().inset(by: size / 4).stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 4])).foregroundStyle(Theme.line)
-            // Your view cone.
-            Path { p in
-                p.move(to: CGPoint(x: size / 2, y: size / 2))
-                p.addLine(to: CGPoint(x: size / 2 - 30, y: 8))
-                p.addLine(to: CGPoint(x: size / 2 + 30, y: 8))
-                p.closeSubpath()
+    /// Top-down, you in the middle facing up: the scanned floor plan turns
+    /// around you as you turn, with everyone's position and view cone.
+    private func radarDisc(_ all: [Other], size: CGFloat = 210) -> some View {
+        let walls = relay.allWalls
+        let openings = relay.rooms.flatMap(\.openings)
+        let me = capture.localMark.map { relay.alignment.transform.apply($0) }
+        let marks = relay.peerMarks
+        let names = Dictionary(uniqueKeysWithValues: relay.members.map { ($0.id, $0.name) })
+        let range: Float = 7 // metres from you to the rim
+        return Canvas { ctx, canvas in
+            let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+            let radius = canvas.width / 2
+            let scale = CGFloat(Float(radius - 8) / range)
+            ctx.fill(Path(ellipseIn: CGRect(origin: .zero, size: canvas)), with: .color(Color(white: 0.06, opacity: 0.92)))
+            ctx.clip(to: Path(ellipseIn: CGRect(origin: .zero, size: canvas).insetBy(dx: 1, dy: 1)))
+            guard let me else { return }
+            // Map point -> screen: you at the centre, your facing up.
+            let f = SIMD2<Float>(-sin(me.yaw), -cos(me.yaw)), r = SIMD2<Float>(cos(me.yaw), -sin(me.yaw))
+            func pt(_ x: Float, _ z: Float) -> CGPoint {
+                let d = SIMD2(x - me.x, z - me.z)
+                return CGPoint(x: c.x + CGFloat(simd_dot(d, r)) * scale, y: c.y - CGFloat(simd_dot(d, f)) * scale)
             }
-            .fill(Theme.red.opacity(0.18))
-            Circle().fill(Theme.red).frame(width: 12, height: 12)
-            ForEach(all) { o in
-                let r = CGFloat(min(o.distance, range) / range) * (size / 2 - 10)
-                let x = -sin(CGFloat(o.bearing)) * r, y = -cos(CGFloat(o.bearing)) * r
-                VStack(spacing: 2) {
-                    Circle().fill(Color.white).frame(width: 10, height: 10)
-                    Text(o.name).label(7, bold: true)
-                }
-                .offset(x: x, y: y + 6)
+            func dir(_ yaw: Float) -> CGVector {
+                let g = SIMD2<Float>(-sin(yaw), -cos(yaw))
+                return CGVector(dx: CGFloat(simd_dot(g, r)), dy: -CGFloat(simd_dot(g, f)))
             }
+            // Distance ring.
+            let ring = CGFloat(Float(range) / 2) * scale
+            ctx.stroke(Path(ellipseIn: CGRect(x: c.x - ring, y: c.y - ring, width: 2 * ring, height: 2 * ring)),
+                       with: .color(.white.opacity(0.12)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+            // Floor plan from the LiDAR map.
+            var plan = Path()
+            for w in walls { plan.move(to: pt(w.a.x, w.a.y)); plan.addLine(to: pt(w.b.x, w.b.y)) }
+            ctx.stroke(plan, with: .color(.white.opacity(0.75)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            for o in openings {
+                var p = Path(); p.move(to: pt(o.a.x, o.a.y)); p.addLine(to: pt(o.b.x, o.b.y))
+                ctx.stroke(p, with: .color(o.kind == "door" ? Theme.red : .white.opacity(0.4)), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+            }
+            func cone(at p: CGPoint, yaw: Float, colour: Color, length: CGFloat) {
+                let d = dir(yaw), a = atan2(d.dy, d.dx), half = 0.5
+                var w = Path()
+                w.move(to: p)
+                w.addLine(to: CGPoint(x: p.x + cos(a - half) * length, y: p.y + sin(a - half) * length))
+                w.addLine(to: CGPoint(x: p.x + cos(a + half) * length, y: p.y + sin(a + half) * length))
+                w.closeSubpath()
+                ctx.fill(w, with: .color(colour.opacity(0.28)))
+            }
+            // Everyone else: where they are and which way they're looking.
+            for o in all {
+                guard let m = marks[o.id] else { continue }
+                let p = pt(m.x, m.z)
+                cone(at: p, yaw: m.yaw, colour: .white, length: 30)
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)), with: .color(o.feed == nil ? .white.opacity(0.5) : .white))
+                ctx.draw(Text(names[o.id] ?? o.name).font(Theme.mono(8, bold: true)).foregroundColor(.white), at: CGPoint(x: p.x, y: p.y + 12))
+            }
+            // You.
+            cone(at: c, yaw: me.yaw, colour: Theme.red, length: 40)
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 6, y: c.y - 6, width: 12, height: 12)), with: .color(Theme.red))
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("Radar: \(all.map(\.name).joined(separator: ", "))")
+        .overlay(Circle().stroke(Theme.line))
+        .accessibilityLabel("Radar with the floor plan: \(all.map(\.name).joined(separator: ", "))")
+    }
+
+    /// Everyone's current view, side by side.
+    private func viewGrid(_ all: [Other]) -> some View {
+        let live = all.filter { $0.feed != nil }
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(live) { o in
+                VStack(alignment: .leading, spacing: 5) {
+                    Image(uiImage: o.feed!.image).resizable().aspectRatio(contentMode: .fill)
+                        .frame(height: 150).frame(maxWidth: .infinity).clipped()
+                        .overlay(Rectangle().stroke(Color.white.opacity(0.7), lineWidth: 1))
+                    HStack(spacing: 5) {
+                        Circle().fill(Theme.red).frame(width: 6, height: 6)
+                        Text(o.name).label(8, bold: true)
+                        Spacer()
+                        Text(String(format: "%.0f m", o.distance)).label(8).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: Still
 
     private var still: some View {
-        ZStack {
-            Color.black.opacity(0.88).ignoresSafeArea()
+        let all = others
+        return ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
             VStack(spacing: 14) {
                 HStack {
                     IconButton(glyph: .back, label: "Back to the group") { model.mode = .group }
                     Spacer()
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.red).frame(width: 8, height: 8)
+                        Text("Live · still").label(10, bold: true)
+                    }
+                    Spacer()
+                    Color.clear.frame(width: 46, height: 46)
                 }
-                Spacer()
-                Circle().fill(Theme.red).frame(width: 14, height: 14)
-                Text("LIVE").font(Theme.display(64))
                 Text("Streaming to the group. Keep this phone where it is, pointing into the room.")
-                    .font(.system(size: 15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                Spacer()
+                    .font(.system(size: 14)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView { viewGrid(all) }
+                if all.allSatisfy({ $0.feed == nil }) {
+                    Text("Other phones' views appear here when they go live.").font(.footnote).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+                radarDisc(all, size: 190)
                 if let me = relay.selfId {
                     PillButton(title: "Switch to Move", filled: false) { model.setRole("move", for: me) }
                 }

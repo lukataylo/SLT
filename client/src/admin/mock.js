@@ -54,6 +54,7 @@ const PATHS = [
   [[1.5, 1.5], [4, 1.5], [4, 3.8], [1.2, 3.8]],
   [[6, 1.5], [8.2, 1.5], [8.2, 5.5], [6, 5.5], [7, 3.5]],
   [[1, 5.6], [4, 5.6], [4, 6.4], [1, 6.4]],
+  [[7.5, 6.2], [5.8, 6.2], [5.8, 4.2], [7.5, 4.2]],
 ];
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -183,12 +184,26 @@ function sampleRoom(room) {
   return { points, colors, normals };
 }
 
-// A fake camera frame: what a phone in this room might see.
-async function fakeFrame(room, name, t) {
+// A fake camera frame: what a phone in this room might see. A phone held in
+// portrait still delivers a landscape sensor image, rotated a quarter-turn
+// anticlockwise from upright, exactly as ARKit's camera does.
+async function fakeFrame(room, name, t, portrait = false) {
   const c = document.createElement('canvas');
   c.width = 320;
   c.height = 240;
   const ctx = c.getContext('2d');
+  if (portrait) {
+    const up = await uprightPortrait(room, name, t);
+    const out = document.createElement('canvas');
+    out.width = 320;
+    out.height = 240;
+    const o = out.getContext('2d');
+    o.translate(0, 240);
+    o.rotate(-Math.PI / 2);
+    o.drawImage(up, 0, 0);
+    const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', 0.8));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
   const [r, g, b] = WALL_RGB[room?.id] ?? [180, 180, 180];
   const wall = ctx.createLinearGradient(0, 0, 0, 150);
   wall.addColorStop(0, `rgb(${r - 30},${g - 30},${b - 30})`);
@@ -218,14 +233,48 @@ async function fakeFrame(room, name, t) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+// What a portrait-held phone sees, upright (240 x 320): a tall doorway.
+async function uprightPortrait(room, name, t) {
+  const c = document.createElement('canvas');
+  c.width = 240;
+  c.height = 320;
+  const ctx = c.getContext('2d');
+  const [r, g, b] = WALL_RGB[room?.id] ?? [180, 180, 180];
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.fillRect(0, 0, 240, 230);
+  ctx.fillStyle = '#8b6744';
+  ctx.fillRect(0, 230, 240, 90);
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(70 + Math.sin(t / 1800) * 12, 40, 100, 190); // door
+  ctx.fillStyle = '#d8c070';
+  ctx.beginPath();
+  ctx.arc(155 + Math.sin(t / 1800) * 12, 140, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, 240, 26);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(`▲ UP · ${name.toUpperCase()} · PORTRAIT`, 8, 17);
+  return c;
+}
+
+// q_a * q_b for [x, y, z, w] quaternions.
+function qmul([ax, ay, az, aw], [bx, by, bz, bw]) {
+  return [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz];
+}
+// Camera of a phone held upright in portrait, looking ahead along -Z: camera
+// +x (towards the phone's bottom edge) points down; a -90° roll about Z.
+const PORTRAIT = [0, 0, -Math.SQRT1_2, Math.SQRT1_2];
+
 export function startMock(handle, handleFrame) {
   let version = 1;
   handle({ t: 'admin', map: mapJson(version, 0), devices: [] });
 
   const devices = [
-    { id: 'p1', name: 'iPhone 17 Pro', kind: 'lidar', aligned: true, roomId: 'r1', live: true },
+    { id: 'p1', name: 'iPhone 17 Pro', kind: 'lidar', role: 'move', aligned: true, roomId: 'r1', live: true },
     { id: 'p2', name: 'Pixel Web', kind: 'web', aligned: true, roomId: 'r2', live: true },
-    { id: 'p3', name: 'iPad mini', kind: 'lidar', aligned: false, roomId: null, live: true },
+    { id: 'p3', name: 'iPad mini', kind: 'lidar', role: 'move', aligned: false, roomId: null, live: true },
+    { id: 'p4', name: 'Tom', kind: 'lidar', role: 'still', aligned: true, roomId: 'r2', live: true, portrait: true },
   ];
   const state = devices.map(() => ({ seg: 0, k: 0 }));
   const roomAt = (x, z) => ROOMS.find((r) => x >= r.floor[0][0] && x <= r.floor[2][0] && z >= r.floor[0][1] && z <= r.floor[2][1])?.id ?? null;
@@ -244,10 +293,11 @@ export function startMock(handle, handleFrame) {
       const x = a[0] + (b[0] - a[0]) * s.k;
       const z = a[1] + (b[1] - a[1]) * s.k;
       const yaw = Math.atan2(-(b[0] - a[0]), -(b[1] - a[1]));
-      d.pose = { p: [x, 1.4, z], q: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] };
+      const turn = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)];
+      d.pose = { p: [x, 1.4, z], q: d.portrait ? qmul(turn, PORTRAIT) : turn };
       if (d.aligned) d.roomId = roomAt(x, z);
     });
-    handle({ t: 'devices', devices: devices.map((d) => ({ ...d })) });
+    handle({ t: 'devices', devices: devices.map(({ portrait, ...d }) => ({ ...d })) });
   }, 200);
 
   // Each room's scan streams in over a few seconds, in slices like the phone sends.
@@ -268,12 +318,12 @@ export function startMock(handle, handleFrame) {
     });
   }, 120);
 
-  // Camera frames at ~2 fps per streaming device, like the server sends admins.
+  // Camera frames per streaming device, like the server sends admins.
   setInterval(async () => {
     for (const d of devices) {
       if (!d.pose || !d.live) continue;
       const room = ROOMS.find((r) => r.id === d.roomId);
-      handleFrame?.({ id: d.id, ts: Date.now(), ...d.pose }, await fakeFrame(room, d.name, Date.now()));
+      handleFrame?.({ id: d.id, ts: Date.now(), ...d.pose }, await fakeFrame(room, d.name, Date.now(), d.portrait));
     }
   }, 500);
 

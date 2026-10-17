@@ -53,8 +53,14 @@ struct GroupView: View {
 
     private func row(_ m: Member) -> some View {
         let isMe = m.id == relay.selfId
+        let feed = relay.feeds[m.id].flatMap { Date().timeIntervalSince($0.receivedAt) < 5 ? $0 : nil }
         return HStack(spacing: 12) {
             Circle().fill(isMe ? Theme.red : (m.online ? Color.white : Theme.muted)).frame(width: 8, height: 8)
+            // Their current view, so everyone sees what everyone sees.
+            if let feed {
+                Image(uiImage: feed.image).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(m.name.uppercased()).font(Theme.display(20)).lineLimit(1)
                 Text(status(m, isMe: isMe)).label(8).foregroundStyle(m.located ? Theme.muted : Theme.red)

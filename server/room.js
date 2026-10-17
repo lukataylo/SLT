@@ -10,7 +10,8 @@ export const MAX_WALLS_PER_PEER = 300;
 const MAX_OPENINGS_PER_PEER = 100;
 const MAX_FLOOR_POINTS = 400;
 const MAX_CLOUD_PER_MESSAGE = 3 * 8000;
-const ADMIN_FRAME_INTERVAL_MS = 500;
+// The operator console's video wall: 4 fps per phone is smooth enough to watch.
+const ADMIN_FRAME_INTERVAL_MS = 250;
 const PAIRING_CODE_TTL_MS = 3000;
 
 // How sure registration must be before a phone's poses are trusted in the map.
@@ -461,6 +462,7 @@ export class Room {
       id: p.id,
       name: p.name,
       kind: p.local ? 'lidar' : 'web',
+      role: p.role ?? null,
       pose: p.pose,
       aligned: p.local ? !!p.alignment : true,
       roomId: p.roomId ?? null,
@@ -496,7 +498,7 @@ export class Room {
     for (const other of this.peers.values()) {
       if (other.id !== id) this.sendBinary(other, peer.lastFrame);
     }
-    // Admins see each device's camera as a picture on its beacon: 2 fps is plenty.
+    // Admins see each device's camera on its beacon and the operator video wall.
     for (const admin of this.admins.values()) {
       if (peer.lastFrameAt - (admin.lastFrameSent.get(id) ?? 0) < ADMIN_FRAME_INTERVAL_MS) continue;
       admin.lastFrameSent.set(id, peer.lastFrameAt);

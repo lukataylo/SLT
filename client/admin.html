@@ -16,11 +16,16 @@
   </head>
   <body data-tab="devices">
     <div id="stage"></div>
+    <main id="operator" aria-label="Security operator view"></main>
 
     <header id="top">
       <div class="brand">
         <span class="dot red"></span>
         <h1>SLT<span>ADMIN</span></h1>
+      </div>
+      <div class="views" role="group" aria-label="View">
+        <button data-view="operator" aria-pressed="true">OPERATOR</button>
+        <button data-view="3d" aria-pressed="false">3D</button>
       </div>
       <div class="stats">
         <div><b id="statWalls">00</b><span>WALLS</span></div>
