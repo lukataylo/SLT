@@ -52,8 +52,8 @@ struct LiveView: View {
 
     // MARK: Move: radar
 
-    /// Other people appear as stick figures where they stand, drawn through
-    /// walls (dashed when a wall is between you). Tap one to open their view.
+    /// Other people behind walls appear as stick figures where they stand.
+    /// People in plain sight get just a name tag. Tap either to open their view.
     private var radar: some View {
         let all = others
         let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
@@ -70,7 +70,11 @@ struct LiveView: View {
                     ForEach(figures.figures.filter(\.visible)) { f in
                         let h = max(f.feet.y - f.head.y, 24)
                         let wall = behindWall(f.id)
-                        StickFigure(head: f.head, feet: f.feet, behindWall: wall, selected: opened == f.id)
+                        // The figure is the x-ray: only drawn when a wall hides them.
+                        // In plain sight you see the person; just their tag shows.
+                        if wall {
+                            StickFigure(head: f.head, feet: f.feet, behindWall: true, selected: opened == f.id)
+                        }
                         // Name and distance over the head.
                         HStack(spacing: 5) {
                             Circle().fill(byId[f.id]?.feed == nil ? Color.white.opacity(0.4) : Theme.red).frame(width: 6, height: 6)
