@@ -8,6 +8,9 @@ struct LiveView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var relay: RelayClient
     @ObservedObject var capture: ARCapture
+    @ObservedObject var figures: FigureStore
+    /// Whose view is open (tapped figure or edge arrow).
+    @State private var opened: String?
 
     var body: some View {
         Group {
@@ -47,50 +50,147 @@ struct LiveView: View {
         }
     }
 
-    /// Within this angle of where you face, a phone's view locks on.
-    private static let lockAngle: Float = 15 * .pi / 180
-
     // MARK: Move: radar
 
+    /// Other people appear as stick figures where they stand, drawn through
+    /// walls (dashed when a wall is between you). Tap one to open their view.
     private var radar: some View {
         let all = others
-        let locked = all.filter { $0.feed != nil && abs($0.bearing) < Self.lockAngle }.min { abs($0.bearing) < abs($1.bearing) }
-        let docked = all.filter { $0.feed != nil && $0.id != locked?.id }
+        let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+        let walls = relay.allWalls
+        let me = capture.localMark.map { relay.alignment.transform.apply($0) }
+        let marks = relay.peerMarks
+        func behindWall(_ id: String) -> Bool {
+            guard let me, let m = marks[id] else { return false }
+            return Self.wallBetween(SIMD2(me.x, me.z), SIMD2(m.x, m.z), walls)
+        }
         return ZStack {
-            Color.black.opacity(locked == nil ? 0.15 : 0.45).ignoresSafeArea().allowsHitTesting(false)
+            GeometryReader { geo in
+                ZStack {
+                    ForEach(figures.figures.filter(\.visible)) { f in
+                        let h = max(f.feet.y - f.head.y, 24)
+                        let wall = behindWall(f.id)
+                        StickFigure(head: f.head, feet: f.feet, behindWall: wall, selected: opened == f.id)
+                        // Name and distance over the head.
+                        HStack(spacing: 5) {
+                            Circle().fill(byId[f.id]?.feed == nil ? Color.white.opacity(0.4) : Theme.red).frame(width: 6, height: 6)
+                            Text(f.name).label(9, bold: true)
+                            Text(String(format: "%.0f m%@", f.distance, wall ? " · behind wall" : "")).label(8).foregroundStyle(.white.opacity(0.75))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Capsule().fill(Theme.panel))
+                        .position(x: f.head.x, y: f.head.y - 18)
+                        .allowsHitTesting(false)
+                        // Tap target over the whole figure.
+                        Color.clear.contentShape(Rectangle())
+                            .frame(width: max(h * 0.5, 64), height: h + 40)
+                            .position(x: (f.head.x + f.feet.x) / 2, y: (f.head.y + f.feet.y) / 2 - 10)
+                            .onTapGesture { open(f.id) }
+                            .accessibilityElement()
+                            .accessibilityLabel("\(f.name), \(String(format: "%.0f", f.distance)) metres\(wall ? ", behind a wall" : ""). Open their view.")
+                            .accessibilityAddTraits(.isButton)
+                    }
+                    // People out of view: an arrow at the screen edge on their side.
+                    ForEach(figures.figures.filter { !$0.visible }) { f in
+                        edgeChip(f, in: geo.size)
+                    }
+                }
+            }
+            .ignoresSafeArea()
+
             VStack(spacing: 12) {
                 topBar(count: all.filter { $0.feed != nil }.count)
-                if let locked, let feed = locked.feed {
-                    lockedCard(locked, feed)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                }
                 Spacer()
                 if all.isEmpty {
                     Panel {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("NOBODY TO SEE YET").font(Theme.display(22))
-                            Text("When others in the group go live, they appear on the radar.").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                            Text("When others in the group are placed, they appear here as figures, through the walls.").font(.system(size: 14)).foregroundStyle(Theme.muted)
                         }
                     }
-                } else if locked == nil, let nearest = all.filter({ $0.feed != nil }).min(by: { abs($0.bearing) < abs($1.bearing) }) {
-                    Text("Turn \(nearest.bearing > 0 ? "left" : "right") to see \(nearest.name)").label(10, bold: true)
+                } else if opened == nil {
+                    Text("Tap a person to open their view").label(9, bold: true)
                         .padding(.horizontal, 14).padding(.vertical, 9)
                         .background(Capsule().fill(Theme.panel))
                 }
                 radarDisc(all)
             }
             .padding(16)
-            .animation(.snappy(duration: 0.25), value: locked?.id)
 
-            // Docked views on the edge, on each phone's side.
-            HStack {
-                VStack(spacing: 10) { ForEach(docked.filter { $0.bearing > 0 }) { dockCard($0, left: true) } }
-                Spacer()
-                VStack(spacing: 10) { ForEach(docked.filter { $0.bearing <= 0 }) { dockCard($0, left: false) } }
+            if let id = opened, let o = byId[id] {
+                Color.black.opacity(0.55).ignoresSafeArea().onTapGesture { opened = nil }
+                viewCard(o, behindWall: behindWall(id))
+                    .padding(16)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
-            .padding(.top, 140)
-            .frame(maxHeight: .infinity, alignment: .top)
         }
+        .animation(.snappy(duration: 0.22), value: opened)
+    }
+
+    private func open(_ id: String) {
+        Haptics.tap()
+        opened = id
+    }
+
+    /// Whether any scanned wall crosses the straight line between two people.
+    static func wallBetween(_ a: SIMD2<Float>, _ b: SIMD2<Float>, _ walls: [WallSegment]) -> Bool {
+        func cross(_ p: SIMD2<Float>, _ q: SIMD2<Float>) -> Float { p.x * q.y - p.y * q.x }
+        let d = b - a
+        for w in walls {
+            let e = w.b - w.a, denom = cross(d, e)
+            guard abs(denom) > 1e-6 else { continue }
+            let t = cross(w.a - a, e) / denom, u = cross(w.a - a, d) / denom
+            // Ignore walls right at either person (they may be leaning on one).
+            if t > 0.05 && t < 0.95 && u >= 0 && u <= 1 { return true }
+        }
+        return false
+    }
+
+    private func edgeChip(_ f: FigureStore.Figure, in size: CGSize) -> some View {
+        let inset = CGRect(origin: .zero, size: size).insetBy(dx: 70, dy: 150)
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        let dx = cos(f.angle), dy = sin(f.angle)
+        let r = min(dx == 0 ? .infinity : inset.width / 2 / abs(dx), dy == 0 ? .infinity : inset.height / 2 / abs(dy))
+        return Button { open(f.id) } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "arrowtriangle.right.fill").font(.system(size: 10)).rotationEffect(.radians(f.angle)).foregroundStyle(Theme.red)
+                Text(f.name).label(9, bold: true)
+                Text(String(format: "%.0f m", f.distance)).label(8).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Capsule().fill(Theme.panel))
+            .overlay(Capsule().stroke(Theme.line))
+        }
+        .foregroundStyle(.white)
+        .position(x: c.x + dx * r, y: c.y + dy * r)
+        .accessibilityLabel("\(f.name), \(String(format: "%.0f", f.distance)) metres, out of view. Open their view.")
+    }
+
+    /// Someone's live view, opened from their figure.
+    private func viewCard(_ o: Other, behindWall: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(o.feed == nil ? Color.white.opacity(0.4) : Theme.red).frame(width: 8, height: 8)
+                Text(o.name.uppercased()).font(Theme.display(24))
+                Spacer()
+                IconButton(glyph: .close, label: "Close their view") { opened = nil }
+            }
+            Text("\(String(format: "%.0f", o.distance)) m away\(behindWall ? " · behind a wall" : "")\(o.still ? " · still" : "")")
+                .label(9).foregroundStyle(Theme.muted)
+            if let feed = o.feed {
+                Image(uiImage: feed.image).resizable().aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 460)
+                    .overlay(Rectangle().stroke(Theme.red, lineWidth: 2))
+                Text("What \(o.name) sees, live.").font(.footnote).foregroundStyle(Theme.muted)
+            } else {
+                Text("No video from \(o.name) yet. Their view appears once they're live.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 24).fill(Color.black.opacity(0.92)))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Theme.line))
     }
 
     private func topBar(count: Int) -> some View {
@@ -107,41 +207,6 @@ struct LiveView: View {
             Spacer()
             Color.clear.frame(width: 46, height: 46)
         }
-    }
-
-    private func lockedCard(_ o: Other, _ feed: RemoteFeed) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Circle().fill(Theme.red).frame(width: 7, height: 7)
-                Text("\(o.name) · \(String(format: "%.0f", o.distance)) m").label(10, bold: true)
-                Spacer()
-                Text("Locked on").label(8).foregroundStyle(Theme.muted)
-            }
-            Image(uiImage: feed.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: 340)
-                .overlay(Rectangle().stroke(Theme.red, lineWidth: 2))
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 20).fill(Theme.panel))
-    }
-
-    private func dockCard(_ o: Other, left: Bool) -> some View {
-        VStack(alignment: left ? .leading : .trailing, spacing: 4) {
-            if let feed = o.feed {
-                Image(uiImage: feed.image).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: 92, height: 92).clipped()
-                    .overlay(Rectangle().stroke(Color.white.opacity(0.8), lineWidth: 1.5))
-            }
-            Text(left ? "◀ \(o.name)" : "\(o.name) ▶").label(8, bold: true)
-            Text(String(format: "%.0f m", o.distance)).label(8).foregroundStyle(Theme.muted)
-        }
-        .padding(8)
-        .background(Theme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(o.name), \(String(format: "%.0f", o.distance)) metres to your \(left ? "left" : "right")")
     }
 
     /// Top-down, you in the middle facing up: the scanned floor plan turns

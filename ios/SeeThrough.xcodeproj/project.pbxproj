@@ -31,6 +31,7 @@
 		9746667391F574EB2FE8B1B3 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725CB393B4547C985E66C988 /* ScanView.swift */; };
 		A7912FB49AE9467883B53919 /* PairingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68DE356BAC41681776D02 /* PairingViews.swift */; };
 		BC25F29C178A4A58AC36CC40 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC603A3EBE175DDBDDB44C4 /* Wire.swift */; };
+		BCA8E202FD0AF19F198AC96C /* Figures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F0BEA32D47DC49E2A622C9 /* Figures.swift */; };
 		C397696CCEBE494804B935EB /* ARCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */; };
 		C8977C71469C90407061C9E6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22302FAB97C31B2324DB452B /* SettingsView.swift */; };
 		CB00AFA74B0C97F6E03DC708 /* PlanViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EECFBA8047209B78CC3F6D5 /* PlanViews.swift */; };
@@ -40,6 +41,7 @@
 
 /* Begin PBXFileReference section */
 		0AFB1E234697F412A47BFB90 /* OFL-SpaceMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-SpaceMono.txt"; sourceTree = "<group>"; };
+		19F0BEA32D47DC49E2A622C9 /* Figures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Figures.swift; sourceTree = "<group>"; };
 		1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARCapture.swift; sourceTree = "<group>"; };
 		1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeeThroughApp.swift; sourceTree = "<group>"; };
 		22302FAB97C31B2324DB452B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -79,6 +81,7 @@
 				64ABFA156B26B5BAF3250110 /* AppModel.swift */,
 				1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */,
 				E5444AC4E972792FA3263D8D /* ARPreview.swift */,
+				19F0BEA32D47DC49E2A622C9 /* Figures.swift */,
 				BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */,
 				AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */,
 				5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */,
@@ -212,6 +215,7 @@
 				C397696CCEBE494804B935EB /* ARCapture.swift in Sources */,
 				EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */,
 				8606D325C4A794F4504C1CB1 /* AppModel.swift in Sources */,
+				BCA8E202FD0AF19F198AC96C /* Figures.swift in Sources */,
 				10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */,
 				41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */,
 				4BB7C8C778731DCFDF587004 /* FloorPlan3D.swift in Sources */,

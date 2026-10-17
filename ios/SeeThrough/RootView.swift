@@ -19,6 +19,16 @@ private struct RootContent: View {
     @ObservedObject var relay: RelayClient
     @ObservedObject var capture: ARCapture
     @ObservedObject var settings: Settings
+    @StateObject private var figures = FigureStore()
+
+    /// Other placed phones, as people to draw (Move phones in Live only).
+    private var people: [PersonMark] {
+        guard model.mode == .live, !model.isStill else { return [] }
+        return relay.members.compactMap { m in
+            guard m.id != relay.selfId, m.located, let mark = relay.peerMarks[m.id] else { return nil }
+            return PersonMark(id: m.id, name: m.name, x: mark.x, z: mark.z)
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -27,7 +37,9 @@ private struct RootContent: View {
                 // Views are shown on screen (LiveView), not placed in 3D.
                 alignment: relay.alignment.aligned ? relay.alignment.transform : nil,
                 showMesh: (model.mode == .scan || model.mode == .floorplan) && settings.showMesh,
-                showPlanes: (model.mode == .scan || model.mode == .floorplan) && settings.showPlanes
+                showPlanes: (model.mode == .scan || model.mode == .floorplan) && settings.showPlanes,
+                people: people,
+                figures: figures
             )
             .ignoresSafeArea()
 
@@ -35,7 +47,7 @@ private struct RootContent: View {
             case .start: StartView(model: model, relay: relay, settings: settings)
             case .creating: CreatingView(model: model, capture: capture)
             case .group: GroupView(model: model, relay: relay)
-            case .live: LiveView(model: model, relay: relay, capture: capture)
+            case .live: LiveView(model: model, relay: relay, capture: capture, figures: figures)
             case .scan: ScanView(model: model, relay: relay, capture: capture)
             case .pairScan: PairScanView(model: model)
             case .floorplan: LiveFloorPlanView(model: model, relay: relay, capture: capture, settings: settings)

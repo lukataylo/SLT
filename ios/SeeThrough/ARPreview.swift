@@ -20,6 +20,9 @@ struct ARPreview: UIViewRepresentable {
     var showPlanes = true
     /// Map walls (map frame) drawn as faint outlines while seeing through.
     var ghostWalls: [WallSegment] = []
+    /// Other people to place on screen as figures (Live), and where to put them.
+    var people: [PersonMark] = []
+    var figures: FigureStore?
 
     func makeUIView(context: Context) -> ARSCNView {
         let view = ARSCNView(frame: .zero)
@@ -41,11 +44,63 @@ struct ARPreview: UIViewRepresentable {
         }
         c.showMesh = showMesh
         c.showPlanes = showPlanes
+        c.setPeople(people, alignment: alignment, bounds: view.bounds, store: figures)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, ARSCNViewDelegate {
+        // People to project, set on main and read on SceneKit's render thread.
+        private let peopleLock = NSLock()
+        private var people: [PersonMark] = []
+        private var peopleAlignment: FloorTransform?
+        private var viewBounds = CGRect.zero
+        private weak var figureStore: FigureStore?
+        private var lastFigures: TimeInterval = 0
+
+        func setPeople(_ people: [PersonMark], alignment: FloorTransform?, bounds: CGRect, store: FigureStore?) {
+            peopleLock.lock(); defer { peopleLock.unlock() }
+            self.people = people
+            peopleAlignment = alignment
+            viewBounds = bounds
+            figureStore = store
+        }
+
+        /// Each frame (at most 30 a second): project everyone's feet (on the
+        /// floor) and head (1.75 m up) into the view, for the stick figures.
+        func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+            guard time - lastFigures > 1.0 / 30 else { return }
+            lastFigures = time
+            peopleLock.lock()
+            let people = self.people, alignment = peopleAlignment, bounds = viewBounds, store = figureStore
+            peopleLock.unlock()
+            guard let store else { return }
+            guard let alignment, let camera = renderer.pointOfView, !people.isEmpty else {
+                DispatchQueue.main.async { if !store.figures.isEmpty { store.figures = [] } }
+                return
+            }
+            let toLocal = alignment.matrix.inverse
+            let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+            var out: [FigureStore.Figure] = []
+            for p in people {
+                let feet4 = toLocal * SIMD4(p.x, 0, p.z, 1), head4 = toLocal * SIMD4(p.x, 1.75, p.z, 1)
+                let feet = SIMD3(feet4.x, feet4.y, feet4.z), head = SIMD3(head4.x, head4.y, head4.z)
+                let pf = renderer.projectPoint(SCNVector3(feet)), ph = renderer.projectPoint(SCNVector3(head))
+                let behind = simd_dot((feet + head) / 2 - camera.simdWorldPosition, camera.simdWorldFront) < 0
+                var f = CGPoint(x: CGFloat(pf.x), y: CGFloat(pf.y)), h = CGPoint(x: CGFloat(ph.x), y: CGFloat(ph.y))
+                if behind { // the projection mirrors behind the camera
+                    f = CGPoint(x: 2 * centre.x - f.x, y: 2 * centre.y - f.y)
+                    h = CGPoint(x: 2 * centre.x - h.x, y: 2 * centre.y - h.y)
+                }
+                let mid = CGPoint(x: (f.x + h.x) / 2, y: (f.y + h.y) / 2)
+                let visible = !behind && bounds.contains(mid)
+                out.append(.init(id: p.id, name: p.name, head: h, feet: f, visible: visible,
+                                 angle: atan2(mid.y - centre.y, mid.x - centre.x),
+                                 distance: simd_distance(camera.simdWorldPosition * SIMD3(1, 0, 1), feet * SIMD3(1, 0, 1))))
+            }
+            DispatchQueue.main.async { store.figures = out }
+        }
+
         private var windows: [String: SCNNode] = [:]
         private static let windowDistance: Float = 2.5
         private static let red = UIColor(red: 0.843, green: 0.098, blue: 0.129, alpha: 1)
