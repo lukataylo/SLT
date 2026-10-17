@@ -180,3 +180,22 @@ test('findDoorways: door-sized gaps in a wall line are open doors; a scanned doo
   // A piece of wall across the gap (scanned later) means it isn't a doorway.
   assert.equal(findDoorways([...walls, [2.8, 0.05, 4.1, 0.05]]).length, 0);
 });
+
+test('a known heading settles a symmetric room that walls alone cannot', () => {
+  const rect = [
+    [0, 0, 5, 0],
+    [5, 0, 5, 3.5],
+    [5, 3.5, 0, 3.5],
+    [0, 3.5, 0, 0],
+  ];
+  const T = { yaw: 2.4, t: [1.5, 0, -0.7] };
+  const local = rect.map((s) => transformSegment(s, inverse(T)));
+  assert.equal(register(local, rect).ambiguous, true, 'a plain rectangle fits two ways round');
+  const fit = register(local, rect, { yaw: T.yaw + 6 * DEG });
+  assert.equal(fit.ambiguous, false);
+  near(wrap(fit.yaw - T.yaw), 0, 0.5 * DEG, 'yaw');
+  near(fit.t[0], T.t[0], 0.05, 'x');
+  near(fit.t[2], T.t[2], 0.05, 'z');
+  const wrong = register(local, rect, { yaw: T.yaw + 90 * DEG, yawTol: 10 * DEG });
+  assert.ok(!wrong || wrong.inlierFraction < 0.6, `a wrong heading finds no good fit (${wrong?.inlierFraction})`);
+});

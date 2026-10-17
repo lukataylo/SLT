@@ -20,6 +20,8 @@
 		71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */; };
 		7A75CB35A19390B5C2CCADA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B4FB982C6D351EBDA7F6CD /* Theme.swift */; };
 		7F0A1BB921D1D6909D656FEA /* RoomPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */; };
+		FE615CF8C3EA4AF1E7D06FA5 /* WallReferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C3405E26D718A95C00509D2 /* WallReferences.swift */; };
+		E3CB6217AE69FE307F88D2EF /* ViewMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88B1CFEFCAF4726CC4A9AED /* ViewMatcher.swift */; };
 		83D7725535250E63C3843F38 /* MeshProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */; };
 		854FF87A1454391898E567CE /* Doto.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C6FE7FDE8BE1A4EF2157E98B /* Doto.ttf */; };
 		8591589FB84591BBD6B686BD /* OFL-Doto.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8EC197D22D32C3E27832FE85 /* OFL-Doto.txt */; };
@@ -49,6 +51,8 @@
 		5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan3D.swift; sourceTree = "<group>"; };
 		64ABFA156B26B5BAF3250110 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPickerView.swift; sourceTree = "<group>"; };
+		1C3405E26D718A95C00509D2 /* WallReferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallReferences.swift; sourceTree = "<group>"; };
+		E88B1CFEFCAF4726CC4A9AED /* ViewMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewMatcher.swift; sourceTree = "<group>"; };
 		6A2E28742F115954DAB5CA76 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		725CB393B4547C985E66C988 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
 		8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRPairing.swift; sourceTree = "<group>"; };
@@ -93,6 +97,8 @@
 				8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */,
 				252D0BD0194B2B707AEDFE64 /* RelayClient.swift */,
 				69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */,
+				1C3405E26D718A95C00509D2 /* WallReferences.swift */,
+				E88B1CFEFCAF4726CC4A9AED /* ViewMatcher.swift */,
 				6A2E28742F115954DAB5CA76 /* RootView.swift */,
 				725CB393B4547C985E66C988 /* ScanView.swift */,
 				1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */,
@@ -225,6 +231,8 @@
 				2F145AF5A822E5F575D080D0 /* QRPairing.swift in Sources */,
 				911A7DE7CABFF639B2F68AD8 /* RelayClient.swift in Sources */,
 				7F0A1BB921D1D6909D656FEA /* RoomPickerView.swift in Sources */,
+				FE615CF8C3EA4AF1E7D06FA5 /* WallReferences.swift in Sources */,
+				E3CB6217AE69FE307F88D2EF /* ViewMatcher.swift in Sources */,
 				51A0BD1E92255A556F390004 /* RootView.swift in Sources */,
 				9746667391F574EB2FE8B1B3 /* ScanView.swift in Sources */,
 				71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */,

@@ -62,6 +62,15 @@ to a room drawn on the uploaded floor plan, whose outline then shows as a
 dashed target. Rooms can be switched or reset; "Reset entire map" clears every
 room and the origin for everyone.
 
+**Recognising a room.** In the background, located phones photograph each
+room's 4 wall directions, square-on and from well back (`WallReferences.swift`).
+A phone that isn't located matches its camera against them
+(`ViewMatcher.swift`); once several views agree it sends its heading, the
+server puts it in that room straight away, and its LiDAR walls then fit only
+that way round (`register` with `yaw`), which places it exactly even in a
+room that looks the same both ways. Nothing is shown on screen. Photos are
+served from `/api/references/<room>/<id>.jpg`.
+
 **Floor plans.** Upload in `/designer.html`. Once enough walls are scanned
 the server places the plan automatically by matching scanned walls into the
 plan's room outlines (or place it by hand in the designer).
