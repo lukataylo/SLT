@@ -170,11 +170,12 @@ $('cutaway').addEventListener('click', () => {
   $('cutaway').setAttribute('aria-pressed', String(on));
   scene.setCutaway(on);
 });
-let savedMode = 'colour';
+// Height-coloured splats are the default look; true colour is one tap away.
+let savedMode = 'depth';
 try {
-  savedMode = localStorage.getItem('slt.admin.mode') ?? 'colour';
+  savedMode = localStorage.getItem('slt.admin.mode') ?? 'depth';
 } catch {}
-setMode(savedMode === 'depth' ? 'depth' : 'colour');
+setMode(savedMode === 'colour' ? 'colour' : 'depth');
 
 for (const tab of document.querySelectorAll('[data-tab]')) {
   tab.addEventListener('click', () => {

@@ -237,6 +237,10 @@ export class AdminScene {
     this.scene.add(this.box.group);
     this.ground = this.buildGround();
     this.scene.add(this.ground);
+    // The scan floats on its own: no bounding box or ground frame around it.
+    // (The box is still sized every frame; it sets the device tiles' height.)
+    this.box.group.visible = false;
+    this.ground.visible = false;
     this.bounds = new THREE.Box3(new THREE.Vector3(-1, 0, -1), new THREE.Vector3(1, WALL_HEIGHT, 1));
     this.boxNow = { min: this.bounds.min.clone(), max: this.bounds.max.clone() };
     this.framed = false;
@@ -350,23 +354,14 @@ export class AdminScene {
         slab.position.y = 0.005;
         this.mapGroup.add(slab);
         const outline = [];
-        const curtain = [];
         room.floor.forEach(([x, z], i) => {
           const [nx, nz] = room.floor[(i + 1) % room.floor.length];
           outline.push(x, 0.02, z, nx, 0.02, nz);
-          const len = Math.hypot(nx - x, nz - z);
-          for (let t = 0; t < len; t += 0.09) {
-            const px = x + ((nx - x) * t) / len;
-            const pz = z + ((nz - z) * t) / len;
-            curtain.push(px, 0, pz, px, GROUND_Y + 0.05, pz);
-          }
           grow(x, 0, z);
         });
         const ol = lineSegments(outline, null, 0.75);
         ol.material.color.set(0x35e07a);
-        const cu = lineSegments(curtain, null, 0.18);
-        cu.material.color.set(0x2fbf6a);
-        this.mapGroup.add(ol, cu);
+        this.mapGroup.add(ol);
       }
 
       room.walls.forEach((seg, i) => {
