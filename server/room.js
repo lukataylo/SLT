@@ -36,8 +36,10 @@ function cleanName(name, fallback) {
 // room aligns each one to the shared floor plan and converts its poses before
 // relaying them. Until a LiDAR peer is aligned, its poses and frames are held back.
 export class Room {
-  constructor({ recorder = null, now = Date.now, map = new LiveMap(), archive = null } = {}) {
+  constructor({ recorder = null, now = Date.now, map = new LiveMap(), archive = null, references = null } = {}) {
     this.map = map;
+    // Where wall reference photos are written (references.js referenceFiles).
+    this.references = references;
     // Called with the map before a new group wipes it, so nothing is lost.
     this.archive = archive;
     this.lastPeersSignature = '';
@@ -148,6 +150,8 @@ export class Room {
       }
     } else if (msg?.t === 'locate' && peer.local) {
       this.locatePeer(peer, msg);
+    } else if (msg?.t === 'heading' && peer.local) {
+      this.headingHint(peer, msg);
     }
   }
 
@@ -292,6 +296,38 @@ export class Room {
     this.broadcastMap();
   }
 
+  // --- Wall reference photos -------------------------------------------------
+  //
+  // Located phones photograph each room's 4 wall directions in the background.
+  // A phone that isn't located matches its camera against them and reports
+  // the heading it recognised: that puts it in the right room at once, and
+  // its LiDAR walls then only have to fit that way round, which places it
+  // exactly even in a room that looks the same both ways.
+
+  addReference(peer, pose, slot, jpeg) {
+    const roomId = peer.roomId;
+    if (!this.references || !peer.local || !this.map.room(roomId) || !Number.isInteger(slot) || slot < 0 || slot > 3) return;
+    this.references
+      .save(roomId, Buffer.from(jpeg))
+      .then((saved) => {
+        if (!saved || !this.map.room(roomId)) return;
+        const entry = { ...saved, p: pose.p, q: pose.q, fov: pose.fov ?? 60, aspect: pose.aspect ?? 4 / 3, at: new Date(this.now()).toISOString() };
+        this.map.setReference(roomId, slot, entry);
+        this.broadcastMap();
+      })
+      .catch((err) => console.warn('[references]', err.message));
+  }
+
+  // `yaw` turns the phone's own frame onto the map's; `roomId` is the room
+  // whose photos matched.
+  headingHint(peer, msg) {
+    if (peer.alignment || !Number.isFinite(msg.yaw) || !this.map.room(msg.roomId)) return;
+    peer.headingHint = { yaw: msg.yaw, roomId: msg.roomId };
+    peer.roomId = msg.roomId;
+    if (peer.floorY != null && this.map.origin) return this.alignPeer(peer);
+    this.sendAlign(peer, { method: 'heading', correction: 'none' });
+  }
+
   // --- Rooms ------------------------------------------------------------------
 
   roomCommand(peer, msg) {
@@ -408,13 +444,16 @@ export class Room {
     } else if (!this.map.origin) {
       result = { method: 'waiting', correction: 'none' };
     } else {
-      const anchors = this.map.anchorsFor(peer.id);
-      const fit = anchors.length ? register(peer.localWalls, anchors, { initial: peer.alignment }) : null;
+      // A heading recognised from wall photos settles which way round it fits.
+      const hint = peer.alignment ? null : peer.headingHint;
+      const anchors = this.map.anchorsFor(peer.id, hint?.roomId);
+      const fit = anchors.length ? register(peer.localWalls, anchors, { initial: peer.alignment, yaw: hint?.yaw ?? null }) : null;
       const good = fit && !fit.ambiguous && fit.inlierFraction >= MIN_INLIER_FRACTION && fit.inlierLength >= MIN_INLIER_LENGTH;
       const correction = good ? this.correct(peer, { yaw: fit.yaw, t: [fit.t[0], floorDy, fit.t[2]] }) : 'none';
       result = { method: 'walls', ...fit, correction };
     }
     if (peer.alignment) {
+      peer.headingHint = null;
       if (!peer.roomId || !this.map.room(peer.roomId)) {
         const T = peer.alignment;
         const here = this.mapPosition(peer) ?? transformPoint2(0, 0, T);
@@ -534,6 +573,8 @@ export class Room {
     if (!isValidPose(frame.meta) || frame.jpeg.length === 0) return;
     const pose = this.toMapPose(peer, pickPose(frame.meta));
     if (!pose) return;
+    // A wall reference photo from a located phone is kept, not relayed.
+    if (frame.meta.keyframe) return void this.addReference(peer, pose, frame.meta.slot, frame.jpeg);
     this.stats.framesIn++;
     peer.pose = pose;
     peer.lastFrameAt = this.now();

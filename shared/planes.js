@@ -297,8 +297,12 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
  * Finds the yaw + translation that lays a phone's wall segments (its own
  * frame) onto the map's wall segments. Returns null when the phone hasn't seen
  * enough wall in two directions to pin down both axes.
+ *
+ * `yaw`, when known from elsewhere (the phone recognised a wall by sight),
+ * restricts the fit to within `yawTol` of it: a symmetric room then only
+ * fits one way round.
  */
-export function register(local, map, { initial = null, step = 0.2, inlierDist = 0.3, angleTol = 15 * DEG } = {}) {
+export function register(local, map, { initial = null, step = 0.2, inlierDist = 0.3, angleTol = 15 * DEG, yaw: knownYaw = null, yawTol = 15 * DEG } = {}) {
   local = local.filter(isValidSegment);
   map = map.filter(isValidSegment);
   if (!local.length || !map.length) return null;
@@ -318,10 +322,12 @@ export function register(local, map, { initial = null, step = 0.2, inlierDist = 
     { n: uA, ang: domMap + Math.PI / 2 },
   ];
 
+  const allowed = (yaw) => knownYaw == null || angleDiff(yaw, knownYaw, 2 * Math.PI) <= yawTol;
   const hypotheses = [];
-  if (initial) hypotheses.push(initial);
+  if (initial && allowed(initial.yaw)) hypotheses.push(initial);
   for (let k = 0; k < 4; k++) {
     const yaw = wrapAngle(domLocal - domMap + (k * Math.PI) / 2);
+    if (!allowed(yaw)) continue;
     const peaks = families.map((f) => {
       const votes = [];
       for (const l of local) {
@@ -355,7 +361,9 @@ export function register(local, map, { initial = null, step = 0.2, inlierDist = 
       const R = refine(samples, T, mapEntries, inlierDist * 2, angleTol);
       return { T: R, ...evaluate(samples, R, mapEntries, step, inlierDist, angleTol) };
     })
+    .filter((h) => allowed(h.T.yaw))
     .sort((a, b) => b.inlierFraction - a.inlierFraction || a.rms - b.rms);
+  if (!scored.length) return null;
 
   const [best, ...rest] = scored;
   // A symmetric room fits several placements equally well; report that rather

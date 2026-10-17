@@ -7,13 +7,18 @@ import { WebSocketServer } from 'ws';
 import { decodeClouds, encodeClouds } from '../shared/cloud.js';
 import { LiveMap } from './livemap.js';
 import { planApi } from './plans.js';
+import { referenceApi, referenceFiles } from './references.js';
 import { Recorder } from './recorder.js';
 import { Room } from './room.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const STATIC_DIR = path.resolve(fileURLToPath(new URL('../dist', import.meta.url)));
 const recorder = process.env.RECORD_DIR ? new Recorder(process.env.RECORD_DIR) : null;
-const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE), archive: archiveMap });
+// Wall reference photos live beside the map (see references.js).
+const references = referenceFiles(path.join(process.env.MAP_FILE ? path.dirname(process.env.MAP_FILE) : path.resolve('data'), 'references'));
+const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE), archive: archiveMap, references });
+room.map.onReferenceRemoved = (file) => references.remove(file);
+const handleReferences = referenceApi({ map: room.map, dir: references.dir });
 
 // Before a new group (or "new map here") wipes the map, keep a copy beside it.
 function archiveMap(map) {
@@ -131,6 +136,7 @@ async function serveStatic(req, res) {
 
 const server = createServer(async (req, res) => {
   if (await handlePlan(req, res)) return;
+  if (await handleReferences(req, res)) return;
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return void res.end(JSON.stringify({ peers: room.peers.size, admins: room.admins.size, rooms: room.map.rooms.length, walls: room.map.walls.length, ...room.stats }));

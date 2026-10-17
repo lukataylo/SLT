@@ -82,6 +82,13 @@ final class AppModel: ObservableObject {
     /// A code that points at a different server waits for the user's OK.
     @Published var pendingServerSwitch: PairingPayload?
     private var bag = Set<AnyCancellable>()
+    // Recognising a room from its wall photos (see "wall photos" below).
+    private var wallPrints: [String: ViewMatcher.Reference] = [:]
+    private var loadingPrints: Set<String> = []
+    private var headingVote = ViewMatcher.Vote()
+    private var matching = false
+    private var lastHeadingSent: (yaw: Float, at: Date)?
+    private let matchQueue = DispatchQueue(label: "slt.match", qos: .userInitiated)
 
     var isLocated: Bool { relay.alignment.aligned }
     var mapExists: Bool { relay.originFoundedBy != nil }
@@ -105,6 +112,8 @@ final class AppModel: ObservableObject {
         capture.onFrame = { [relay] pose, jpeg in relay.send(pose: pose, jpeg: jpeg) }
         capture.onScan = { [relay] scan in relay.send(scan: scan) }
         capture.onCloud = { [relay] cloud in relay.send(cloud: cloud) }
+        capture.onReference = { [relay] slot, pose, jpeg in relay.send(reference: slot, pose: pose, jpeg: jpeg) }
+        capture.onLookFrame = { [weak self] frame in self?.match(frame) }
         capture.onCollaboration = { [relay] data in relay.send(collaboration: data) }
         relay.onCollaboration = { [capture] data in capture.receiveCollaboration(data) }
         relay.onReset = { [capture] restart in capture.reset(restartTracking: restart) }
@@ -145,6 +154,19 @@ final class AppModel: ObservableObject {
             if a.aligned { self?.capture.publishMapOrigin(a.transform) }
         }.store(in: &bag)
         relay.$rooms.sink { [weak self] _ in DispatchQueue.main.async { self?.applyRoomIntent() } }.store(in: &bag)
+        // Wall photos: keep the targets current, and start afresh once placed.
+        relay.$rooms.sink { [weak self] _ in DispatchQueue.main.async { self?.updateWallPhotos() } }.store(in: &bag)
+        relay.$alignment.sink { [weak self] a in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if a.aligned {
+                    self.headingVote.reset()
+                    self.lastHeadingSent = nil
+                }
+                self.updateWallPhotos()
+            }
+        }.store(in: &bag)
+        Timer.publish(every: 0.5, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.lookForWalls() }.store(in: &bag)
         settings.$shareCamera.sink { [weak self] _ in DispatchQueue.main.async { self?.applyMode() } }.store(in: &bag)
         settings.$captureColour.sink { [weak self] _ in DispatchQueue.main.async { self?.applyMode() } }.store(in: &bag)
 
@@ -167,6 +189,7 @@ final class AppModel: ObservableObject {
         capture.sendCloud = (inGroup || mode == .scan || mode == .floorplan) && settings.captureColour
         capture.detectQR = mode == .pairScan
         if mode != .pairScan { capture.stopTrackingCodes() }
+        updateWallPhotos()
     }
 
     // MARK: group
@@ -237,6 +260,89 @@ final class AppModel: ObservableObject {
         } else if !relay.rooms.isEmpty {
             relay.newRoom(name: intent.name, planRoomId: intent.planRoomId)
             roomIntent = nil
+        }
+    }
+
+    // MARK: wall photos (background)
+
+    // Located phones photograph each room's 4 wall directions as they go,
+    // square-on and from well back. A phone that isn't located matches its
+    // camera against them; once several views agree it knows its heading on
+    // the map and tells the server, which puts it in that room and lets its
+    // LiDAR walls place it exactly. Nothing here is shown on screen.
+
+    /// Modes in which the phone is part of the group and tracking the room.
+    private var inRoomMode: Bool { [.group, .live, .scan, .floorplan].contains(mode) }
+
+    /// Keeps the capture's photo targets in step with the room this phone is in.
+    private func updateWallPhotos() {
+        guard inRoomMode, isLocated, let room = relay.currentRoom, room.walls.count >= 3 else {
+            capture.referenceTargets = nil
+            return
+        }
+        var targets = WallReferences.Targets(alignment: relay.alignment.transform, walls: room.walls)
+        // The photos the room already has, and any just taken, set the bar.
+        for ref in room.references where ref.slot < WallReferences.slots {
+            var camera = simd_float4x4(ref.orientation)
+            camera.columns.3 = SIMD4(ref.position, 1)
+            if let view = WallReferences.view(camera, FloorTransform()),
+               let d = WallReferences.distanceToWall(from: view.position, angle: view.angle, walls: room.walls) {
+                targets.best[ref.slot] = d
+            }
+        }
+        if let taken = capture.referenceTargets?.best {
+            for slot in 0 ..< WallReferences.slots { targets.best[slot] = [targets.best[slot], taken[slot]].compactMap { $0 }.max() }
+        }
+        capture.referenceTargets = targets
+    }
+
+    /// While not located: fetch wall photos not yet loaded, and ask the
+    /// camera for a view to match.
+    private func lookForWalls() {
+        let refs = relay.rooms.flatMap { room in room.references.map { (roomId: room.id, ref: $0) } }
+        let wanted = Set(refs.map(\.ref.id))
+        wallPrints = wallPrints.filter { wanted.contains($0.key) }
+        guard started, !isLocated, inRoomMode, relay.connected, !refs.isEmpty else { return }
+        for (roomId, ref) in refs where wallPrints[ref.id] == nil && !loadingPrints.contains(ref.id) {
+            loadingPrints.insert(ref.id)
+            Task { await loadWallPrint(roomId: roomId, ref: ref) }
+        }
+        if !wallPrints.isEmpty && !matching { capture.wantsLookFrame = true }
+    }
+
+    private func loadWallPrint(roomId: String, ref: RoomReference) async {
+        defer { loadingPrints.remove(ref.id) }
+        guard let data = try? await relay.downloadReference(roomId: roomId, id: ref.id),
+              let image = UIImage(data: data)?.cgImage else { return }
+        let print: ViewMatcher.Print? = await withCheckedContinuation { done in
+            matchQueue.async {
+                guard let gray = ViewMatcher.gray(image) else { return done.resume(returning: nil) }
+                done.resume(returning: ViewMatcher.print(gray: gray.gray, width: gray.width, height: gray.height, orientation: ref.orientation,
+                                                         vfov: ref.vfov * .pi / 180, aspect: ref.aspect))
+            }
+        }
+        if let print { wallPrints[ref.id] = ViewMatcher.Reference(id: ref.id, roomId: roomId, print: print) }
+    }
+
+    private func match(_ frame: ARCapture.LookFrame) {
+        guard !isLocated, !matching else { return }
+        matching = true
+        let references = Array(wallPrints.values)
+        matchQueue.async { [weak self] in
+            let query = ViewMatcher.print(gray: frame.gray, width: frame.width, height: frame.height,
+                                          orientation: frame.orientation, vfov: frame.vfov, aspect: frame.aspect)
+            let matches = query.map { ViewMatcher.locate($0, in: references) } ?? []
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.matching = false
+                guard !self.isLocated, let found = self.headingVote.add(matches) else { return }
+                // Resend when it changes or now and then, until walls place the phone.
+                let changed = self.lastHeadingSent.map { abs(ViewMatcher.wrap($0.yaw - found.offset)) > 3 * .pi / 180 } ?? true
+                let stale = self.lastHeadingSent.map { Date().timeIntervalSince($0.at) > 3 } ?? true
+                guard changed || stale else { return }
+                self.lastHeadingSent = (found.offset, Date())
+                self.relay.sendHeading(yaw: found.offset, roomId: found.roomId)
+            }
         }
     }
 

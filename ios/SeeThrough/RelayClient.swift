@@ -12,6 +12,19 @@ struct MapRoom: Identifiable, Equatable {
     var seen: [Int]
     var openings: [Opening]
     var floor: [SIMD2<Float>]
+    /// Wall photos taken in the background, one per wall direction.
+    var references: [RoomReference] = []
+}
+
+/// A wall photo on the server: which wall direction (`slot`) and where the
+/// camera stood and looked, on the map.
+struct RoomReference: Equatable {
+    var slot: Int
+    var id: String
+    var position: SIMD3<Float>
+    var orientation: simd_quatf
+    var vfov: Float // degrees
+    var aspect: Float
 }
 
 /// The uploaded floor plan: room outlines in plan metres, and where the plan
@@ -264,6 +277,32 @@ final class RelayClient: ObservableObject {
         sendText(["t": "role", "id": id, "role": role])
     }
 
+    // MARK: wall photos
+
+    /// A wall photo for the room this phone is in (kept by the server, not
+    /// relayed). Never dropped: the phone won't retake that view.
+    func send(reference slot: Int, pose: Pose, jpeg: Data) {
+        var meta = pose.json
+        meta["keyframe"] = true
+        meta["slot"] = slot
+        guard let task, connected, let data = Wire.frame(meta: meta, jpeg: jpeg) else { return }
+        task.send(.data(data)) { _ in }
+    }
+
+    func downloadReference(roomId: String, id: String) async throws -> Data {
+        guard let server, let url = URL(string: "/api/references/\(roomId)/\(id).jpg", relativeTo: server) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.fileDoesNotExist) }
+        return data
+    }
+
+    /// This phone's heading on the map, recognised from a room's wall photos:
+    /// `yaw` turns its own frame onto the map. The server puts it in that
+    /// room and lets its LiDAR walls place it exactly.
+    func sendHeading(yaw: Float, roomId: String) {
+        sendText(["t": "heading", "yaw": Double(yaw), "roomId": roomId])
+    }
+
     func switchRoom(_ id: String) { sendText(["t": "room", "action": "switch", "roomId": id]) }
     func resetRoom() { sendText(["t": "room", "action": "reset-room"]) }
     func resetMap() { sendText(["t": "room", "action": "reset-map"]) }
@@ -509,7 +548,14 @@ final class RelayClient: ObservableObject {
             walls: walls,
             seen: r["seen"] as? [Int] ?? [],
             openings: openings,
-            floor: (r["floor"] as? [Any] ?? []).compactMap(point)
+            floor: (r["floor"] as? [Any] ?? []).compactMap(point),
+            references: (r["references"] as? [[String: Any]] ?? []).compactMap { f -> RoomReference? in
+                guard let slot = f["slot"] as? Int, let id = f["id"] as? String,
+                      let p = f["p"] as? [Double], p.count == 3, let q = f["q"] as? [Double], q.count == 4 else { return nil }
+                return RoomReference(slot: slot, id: id, position: SIMD3(Float(p[0]), Float(p[1]), Float(p[2])),
+                                     orientation: simd_quatf(ix: Float(q[0]), iy: Float(q[1]), iz: Float(q[2]), r: Float(q[3])),
+                                     vfov: Float(f["fov"] as? Double ?? 50), aspect: Float(f["aspect"] as? Double ?? 4.0 / 3))
+            }
         )
     }
 

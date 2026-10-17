@@ -9,8 +9,15 @@ const MAX_CLOUD_POINTS = 300000; // per room
 
 const round = (v, k = 1000) => Math.round(v * k) / k;
 
-function emptyRoom({ id, name, origin, planRoomId = null, createdAt }) {
-  return { id, name, origin, planRoomId, createdAt, base: [], openings: [], floor: [], cloud: new Map() };
+// `references` holds one photo per wall direction (slots 0–3), taken while
+// the room was scanned: { id, file, p, q, fov, aspect, at }, pose on the map.
+// A phone entering the room matches its camera against them to learn which
+// way it faces.
+export const REFERENCE_SLOTS = 4;
+
+function emptyRoom({ id, name, origin, planRoomId = null, createdAt, references = null }) {
+  const refs = Array.from({ length: REFERENCE_SLOTS }, (_, i) => references?.[i] ?? null);
+  return { id, name, origin, planRoomId, createdAt, references: refs, base: [], openings: [], floor: [], cloud: new Map() };
 }
 
 // Doors and windows are reinforced like walls: the same opening seen again
@@ -44,11 +51,13 @@ function reinforceOpenings(base, observed) {
 // count of the scan sessions that confirmed them; phones currently scanning
 // contribute live observations on top, committed into the base when they leave.
 export class LiveMap {
-  constructor({ rooms = [], walls = null, origin = null, plan = null, onChange = null, onCloudChange = null } = {}) {
+  constructor({ rooms = [], walls = null, origin = null, plan = null, onChange = null, onCloudChange = null, onReferenceRemoved = null } = {}) {
     this.origin = origin;
     this.plan = plan;
     this.onChange = onChange;
     this.onCloudChange = onCloudChange;
+    // Called with a reference photo's file once nothing refers to it.
+    this.onReferenceRemoved = onReferenceRemoved;
     this.contributions = new Map();
     this.version = 0;
     this.rooms = rooms.map((r) => ({
@@ -108,9 +117,16 @@ export class LiveMap {
   }
 
   // Walls to align `peerId` against: everyone else's evidence across all
-  // rooms, preferring walls that several sessions have confirmed.
-  anchorsFor(peerId) {
-    const all = this.rooms.flatMap((room) => {
+  // rooms (or just `roomId`'s, when it has any), preferring walls that
+  // several sessions have confirmed.
+  anchorsFor(peerId, roomId = null) {
+    const only = roomId && this.room(roomId);
+    if (only && (this.current.get(roomId)?.walls.length ?? 0) > 0) return this.anchorsIn([only], peerId);
+    return this.anchorsIn(this.rooms, peerId);
+  }
+
+  anchorsIn(rooms, peerId) {
+    const all = rooms.flatMap((room) => {
       const others = [...this.contributions].filter(([id, c]) => id !== peerId && c.roomId === room.id).flatMap(([, c]) => c.walls);
       return reinforce(room.base, others);
     });
@@ -144,6 +160,7 @@ export class LiveMap {
   resetRoom(roomId) {
     const room = this.room(roomId);
     if (!room) return false;
+    for (let slot = 0; slot < REFERENCE_SLOTS; slot++) this.setReference(roomId, slot, null);
     Object.assign(room, { base: [], openings: [], floor: [], cloud: new Map() });
     for (const [id, c] of this.contributions) if (c.roomId === roomId) this.contributions.delete(id);
     this.rebuild();
@@ -151,6 +168,7 @@ export class LiveMap {
   }
 
   resetAll() {
+    for (const room of this.rooms) for (let slot = 0; slot < REFERENCE_SLOTS; slot++) this.setReference(room.id, slot, null);
     this.origin = null;
     this.rooms = [];
     this.nextRoom = 1;
@@ -206,6 +224,17 @@ export class LiveMap {
         room.cloud.set(p.slice(0, 3).map((v) => Math.round(v / CLOUD_VOXEL)).join(','), p);
       }
     }
+  }
+
+  // Replaces one of a room's wall reference photos (or clears it with null).
+  setReference(roomId, slot, entry) {
+    const room = this.room(roomId);
+    if (!room || !Number.isInteger(slot) || slot < 0 || slot >= REFERENCE_SLOTS) return false;
+    const old = room.references[slot]?.file;
+    room.references[slot] = entry;
+    if (old && old !== entry?.file) this.onReferenceRemoved?.(old);
+    this.changed();
+    return true;
   }
 
   // --- Floor plan link -------------------------------------------------------
@@ -290,6 +319,8 @@ export class LiveMap {
         openings: cur.openings.map((o) => ({ kind: o.kind, s: o.s.map((v) => round(v)), y0: round(o.y0), y1: round(o.y1), seen: o.seen })),
         floor: cur.floor.map(([x, z]) => [round(x), round(z)]),
         cloudPoints: room.cloud.size,
+        // Photos are fetched from /api/references/<room>/<id>.jpg.
+        references: room.references.flatMap((r, slot) => (r ? [{ slot, id: r.id, p: r.p, q: r.q, fov: r.fov, aspect: r.aspect }] : [])),
       };
     });
     const walls = rooms.flatMap((r) => r.walls);
@@ -318,6 +349,7 @@ export class LiveMap {
         origin: r.origin,
         planRoomId: r.planRoomId,
         createdAt: r.createdAt,
+        references: r.references,
         walls: r.base,
         openings: r.openings,
         floor: r.floor,

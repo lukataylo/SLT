@@ -34,6 +34,29 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     /// while scanning (set by the app's mode and settings).
     var sendFrames = false
     var sendCloud = false
+
+    /// While scanning (and located): the room's 4 wall directions to
+    /// photograph, so phones entering later can tell which way they face
+    /// (see WallReferences). Set by the app model; nil stops it.
+    var referenceTargets: WallReferences.Targets?
+    var onReference: ((_ slot: Int, Pose, Data) -> Void)?
+    private var encodingReference = false
+    private var lastCamera: (transform: simd_float4x4, time: TimeInterval)?
+
+    /// A phone that isn't located asks for one small grayscale view at a
+    /// time to match against the wall photos; delivered on the main thread.
+    var wantsLookFrame = false
+    var onLookFrame: ((LookFrame) -> Void)?
+
+    struct LookFrame {
+        var gray: [Float]
+        var width: Int
+        var height: Int
+        /// Camera to this session's world frame (gravity-aligned).
+        var orientation: simd_quatf
+        var vfov: Float
+        var aspect: Float
+    }
     /// Latest camera pose in our frame, for placing a displayed pairing code.
     private(set) var cameraTransform = matrix_identity_float4x4
 
@@ -54,6 +77,8 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     private static let scanInterval: TimeInterval = 1.0
     private static let meshInterval: TimeInterval = 2.5
     private static let captureWidth: CGFloat = 480
+    private static let referenceWidth: CGFloat = 320
+    private static let lookWidth = 96
 
     private var lastPose: TimeInterval = 0
     private var lastFrame: TimeInterval = 0
@@ -157,6 +182,26 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
                 if self.sendCloud { self.onCloud?(points) }
             }
         }
+        let steady = lastCamera.map { Self.isSteady(from: $0.transform, to: frame.camera.transform, over: now - $0.time) } ?? false
+        lastCamera = (frame.camera.transform, now)
+        if steady && !encodingReference, let candidate = referenceTargets?.candidate(frame.camera.transform) {
+            referenceTargets?.best[candidate.slot] = candidate.distance
+            encodingReference = true
+            let image = CIImage(cvPixelBuffer: frame.capturedImage)
+            encodeQueue.async { [weak self] in
+                guard let self else { return }
+                let jpeg = self.jpeg(image, width: Self.referenceWidth, quality: 0.75)
+                DispatchQueue.main.async {
+                    self.encodingReference = false
+                    if let jpeg { self.onReference?(candidate.slot, pose, jpeg) }
+                }
+            }
+        }
+        if wantsLookFrame, let gray = Self.luma(frame.capturedImage, width: Self.lookWidth) {
+            wantsLookFrame = false
+            onLookFrame?(LookFrame(gray: gray.values, width: gray.width, height: gray.height, orientation: simd_quatf(frame.camera.transform),
+                                   vfov: pose.vfov * .pi / 180, aspect: pose.aspect))
+        }
         // Encode off the main thread, at most one frame at a time, so ARKit
         // never has to hold back more than one camera buffer for us.
         if now - lastFrame >= Self.frameInterval && !encoding {
@@ -251,10 +296,45 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         return Pose(transform: camera.transform, vfov: vfov, aspect: Float(size.width / size.height))
     }
 
-    private func jpeg(_ image: CIImage) -> Data? {
-        let scale = Self.captureWidth / image.extent.width
+    /// Slow enough that a still won't be blurred (under ~30°/s and 0.5 m/s).
+    private static func isSteady(from a: simd_float4x4, to b: simd_float4x4, over dt: TimeInterval) -> Bool {
+        guard dt > 0 else { return false }
+        let fa = -SIMD3(a.columns.2.x, a.columns.2.y, a.columns.2.z), fb = -SIMD3(b.columns.2.x, b.columns.2.y, b.columns.2.z)
+        let turn = acos(min(1, max(-1, simd_dot(fa, fb))))
+        let move = simd_distance(SIMD3(a.columns.3.x, a.columns.3.y, a.columns.3.z), SIMD3(b.columns.3.x, b.columns.3.y, b.columns.3.z))
+        return Double(turn) / dt < 0.5 && Double(move) / dt < 0.5
+    }
+
+    /// The camera's luma plane, box-averaged down to `width` pixels wide, in
+    /// sensor orientation (which is what `camera.transform` describes).
+    private static func luma(_ buffer: CVPixelBuffer, width w: Int) -> (values: [Float], width: Int, height: Int)? {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard CVPixelBufferGetPlaneCount(buffer) > 0, let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return nil }
+        let srcW = CVPixelBufferGetWidthOfPlane(buffer, 0), srcH = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        let step = max(1, srcW / w)
+        let h = srcH / step
+        guard h > 1 else { return nil }
+        let src = base.assumingMemoryBound(to: UInt8.self)
+        var out = [Float](repeating: 0, count: w * h)
+        // Four samples per output pixel: enough to keep fine edges from aliasing.
+        let half = max(1, step / 2)
+        for y in 0 ..< h {
+            for x in 0 ..< w {
+                let sx = x * step, sy = y * step
+                let a = Int(src[sy * stride + sx]), b = Int(src[sy * stride + min(sx + half, srcW - 1)])
+                let c = Int(src[min(sy + half, srcH - 1) * stride + sx]), d = Int(src[min(sy + half, srcH - 1) * stride + min(sx + half, srcW - 1)])
+                out[y * w + x] = Float(a + b + c + d) / 4
+            }
+        }
+        return (out, w, h)
+    }
+
+    private func jpeg(_ image: CIImage, width: CGFloat = ARCapture.captureWidth, quality: CGFloat = 0.6) -> Data? {
+        let scale = width / image.extent.width
         let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let options = [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.6]
+        let options = [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: quality]
         return ciContext.jpegRepresentation(of: scaled, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: options)
     }
 }
