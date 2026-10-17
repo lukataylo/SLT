@@ -15,7 +15,10 @@ struct Mark: Equatable {
     }
 
     init(position: SIMD3<Float>, orientation: simd_quatf) {
-        let forward = orientation.act(SIMD3<Float>(0, 0, -1))
+        var forward = orientation.act(SIMD3<Float>(0, 0, -1))
+        // Held flat (looking at the floor or ceiling), the camera's forward has
+        // no useful heading; use the direction the top of the phone points.
+        if hypot(forward.x, forward.z) < 0.35 { forward = orientation.act(SIMD3<Float>(-1, 0, 0)) }
         self.init(x: position.x, z: position.z, yaw: atan2(-forward.x, -forward.z))
     }
 }

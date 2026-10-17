@@ -13,14 +13,14 @@ struct ScanView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack(alignment: .center) {
-                IconButton(glyph: .back, label: "Back") { model.mode = .home }
+                IconButton(glyph: .back, label: "Back") { model.mode = model.isLocated ? .group : .start }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Scanning").label(9).foregroundStyle(Theme.muted)
                     Text((relay.currentRoom?.name ?? model.roomIntent?.name ?? "Room").uppercased()).font(Theme.display(24)).lineLimit(1)
                 }
                 .padding(.leading, 6)
                 Spacer()
-                Button { model.mode = .home } label: {
+                Button { model.mode = model.isLocated ? .group : .start } label: {
                     Text("Done").label(11, bold: true)
                         .padding(.horizontal, 18).padding(.vertical, 13)
                         .foregroundStyle(.black)
@@ -48,7 +48,7 @@ struct ScanView: View {
         .confirmationDialog(newMapWarning, isPresented: $confirmNewMap, titleVisibility: .visible) {
             Button("Delete it and start here", role: .destructive) {
                 let intent = model.roomIntent
-                model.resetMap()
+                model.startNewMapHere()
                 // Keep going with the room the user picked: it becomes the first room.
                 model.scan(intent.map { .init(existingId: nil, name: $0.name, planRoomId: $0.planRoomId) }
                            ?? .init(existingId: nil, name: "Room 1", planRoomId: nil))

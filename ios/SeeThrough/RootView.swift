@@ -19,29 +19,24 @@ private struct RootContent: View {
     @ObservedObject var relay: RelayClient
     @ObservedObject var capture: ARCapture
     @ObservedObject var settings: Settings
-    @StateObject private var indicators = IndicatorStore()
 
     var body: some View {
         ZStack {
             ARPreview(
                 session: capture.session,
-                feeds: model.mode == .seeThrough ? relay.feeds : [:],
-                feedsVersion: relay.feedsVersion,
+                // Views are shown on screen (LiveView), not placed in 3D.
                 alignment: relay.alignment.aligned ? relay.alignment.transform : nil,
-                xray: model.mode == .seeThrough ? settings.xray : 0,
                 showMesh: model.mode == .scan && settings.showMesh,
-                showPlanes: model.mode == .scan && settings.showPlanes,
-                ghostWalls: model.mode == .seeThrough && settings.wallGhosts ? relay.allWalls : [],
-                indicators: model.mode == .seeThrough ? indicators : nil
+                showPlanes: model.mode == .scan && settings.showPlanes
             )
             .ignoresSafeArea()
 
-            if model.mode == .seeThrough { IndicatorOverlay(store: indicators).ignoresSafeArea() }
-
             switch model.mode {
-            case .home: HomeView(model: model, relay: relay)
+            case .start: StartView(model: model, relay: relay, settings: settings)
+            case .creating: CreatingView(model: model, capture: capture)
+            case .group: GroupView(model: model, relay: relay)
+            case .live: LiveView(model: model, relay: relay, capture: capture)
             case .scan: ScanView(model: model, relay: relay, capture: capture)
-            case .seeThrough: SeeThroughView(model: model, relay: relay, settings: settings)
             case .pairScan: PairScanView(model: model)
             }
         }

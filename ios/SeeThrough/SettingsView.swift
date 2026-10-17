@@ -29,7 +29,6 @@ struct SettingsView: View {
                 section("See through") {
                     grid {
                         tile(.camera, "Share my view", $settings.shareCamera)
-                        tile(.ghost, "Wall outlines", $settings.wallGhosts)
                     }
                 }
                 section("Scanning") {
@@ -65,6 +64,12 @@ struct SettingsView: View {
                             .padding(14).background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.06)))
                         Text("Phones that pair by code join that phone's server automatically.").font(.footnote).foregroundStyle(Theme.muted)
                     }
+                }
+
+                section("3D map") {
+                    PillButton(title: "Scan rooms", filled: false) { model.sheet = .rooms }
+                    Text("Optional. Scanning builds the coloured 3D map in the admin view. See-through works without it.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
                 }
 
                 section("Danger zone") {

@@ -33,10 +33,10 @@ struct ShowCodeView: View {
             } else if !relay.alignment.aligned {
                 Spacer()
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("THIS PHONE ISN'T LOCATED").font(Theme.display(24))
-                    Text("Only a phone that's on the map can place others. Scan a room first, or scan the code on a phone that is.")
+                    Text("THIS PHONE ISN'T PLACED").font(Theme.display(24))
+                    Text("Only a phone that's placed in the group can invite others. Scan the code on a phone that is.")
                         .font(.system(size: 15)).foregroundStyle(Theme.muted)
-                    PillButton(title: "Scan a code instead") { model.scanCode(returnTo: .home) }
+                    PillButton(title: "Scan a code instead") { model.scanCode(returnTo: .group, cancelTo: .group) }
                 }
                 Spacer()
             } else if let payload, let image = QRPairing.image(for: payload.string) {
@@ -155,10 +155,10 @@ struct PairScanView: View {
 
     private var detail: String {
         switch model.scanState {
-        case .looking: return "On the other phone, open the pairing code (the QR icon on its home screen). Fit it in the frame."
+        case .looking: return "On a phone in the group, tap Invite to show its code. Fit the code in the frame."
         case .reading: return "Code read. Keep both phones still while it's measured."
         case .measuring(let by): return "Placing this phone on \(by)'s map…"
-        case .paired(let by): return "On the map with \(by)."
+        case .paired(let by): return "In the group with \(by)."
         case .failed(let why): return why
         }
     }

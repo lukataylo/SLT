@@ -20,8 +20,6 @@ struct ARPreview: UIViewRepresentable {
     var showPlanes = true
     /// Map walls (map frame) drawn as faint outlines while seeing through.
     var ghostWalls: [WallSegment] = []
-    /// Filled with where other phones are on screen (See Through only).
-    var indicators: IndicatorStore?
 
     func makeUIView(context: Context) -> ARSCNView {
         let view = ARSCNView(frame: .zero)
@@ -43,7 +41,6 @@ struct ARPreview: UIViewRepresentable {
         }
         c.showMesh = showMesh
         c.showPlanes = showPlanes
-        if let indicators { c.publishIndicators(view: view, feeds: feeds, into: indicators) }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -111,38 +108,6 @@ struct ARPreview: UIViewRepresentable {
             let node = SCNNode(geometry: geometry)
             node.renderingOrder = 95
             ghosts.addChildNode(node)
-        }
-
-        /// Projects each phone's marker to the screen; phones outside the view
-        /// are pinned to the edge in their direction.
-        func publishIndicators(view: ARSCNView, feeds: [String: RemoteFeed], into store: IndicatorStore) {
-            guard let camera = view.pointOfView else { return }
-            let bounds = view.bounds.insetBy(dx: 70, dy: 120)
-            let centre = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
-            var items: [IndicatorStore.Item] = []
-            for (id, node) in windows where !node.isHidden {
-                guard let marker = node.childNode(withName: "marker", recursively: false), let feed = feeds[id] else { continue }
-                let world = marker.simdWorldPosition
-                let p = view.projectPoint(SCNVector3(world))
-                var point = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
-                // Behind the camera the projection mirrors; flip it back.
-                let behind = simd_dot(world - camera.simdWorldPosition, camera.simdWorldFront) < 0
-                if behind { point = CGPoint(x: 2 * centre.x - point.x, y: 2 * centre.y - point.y) }
-                let onScreen = !behind && bounds.contains(point)
-                let angle = atan2(point.y - centre.y, point.x - centre.x)
-                if !onScreen {
-                    // Walk out from the centre to the inset edge along that direction.
-                    let dx = cos(angle), dy = sin(angle)
-                    let sx = dx == 0 ? .infinity : (bounds.width / 2) / abs(dx)
-                    let sy = dy == 0 ? .infinity : (bounds.height / 2) / abs(dy)
-                    let r = min(sx, sy)
-                    point = CGPoint(x: centre.x + dx * r, y: centre.y + dy * r)
-                }
-                items.append(.init(id: id, name: feed.name, point: point, onScreen: onScreen, angle: angle,
-                                   distance: simd_distance(world, camera.simdWorldPosition)))
-            }
-            items.sort { $0.name < $1.name }
-            DispatchQueue.main.async { if store.items != items { store.items = items } }
         }
 
         func updateWindows(in root: SCNNode, feeds: [String: RemoteFeed], alignment: FloorTransform?, amount: Double) {

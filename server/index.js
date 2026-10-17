@@ -1,4 +1,4 @@
-import { createReadStream, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
@@ -13,7 +13,21 @@ import { Room } from './room.js';
 const PORT = Number(process.env.PORT ?? 8787);
 const STATIC_DIR = path.resolve(fileURLToPath(new URL('../dist', import.meta.url)));
 const recorder = process.env.RECORD_DIR ? new Recorder(process.env.RECORD_DIR) : null;
-const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE) });
+const room = new Room({ recorder, map: loadMap(process.env.MAP_FILE), archive: archiveMap });
+
+// Before a new group (or "new map here") wipes the map, keep a copy beside it.
+function archiveMap(map) {
+  if (!process.env.MAP_FILE) return;
+  const dir = path.join(path.dirname(process.env.MAP_FILE), 'archive', new Date().toISOString().replace(/[:.]/g, '-'));
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'map.json'), JSON.stringify(map.toFile()));
+    writeFileSync(path.join(dir, 'cloud.bin'), encodeClouds(map.cloudRooms()));
+    console.log(`[map] archived to ${dir}`);
+  } catch (err) {
+    console.error('[map] archive:', err.message);
+  }
+}
 // Optional shared secret for the admin view and plan uploads.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
 const PLAN_DIR = process.env.MAP_FILE ? path.join(path.dirname(process.env.MAP_FILE), 'plans') : path.resolve('data/plans');
@@ -159,6 +173,8 @@ wss.on('connection', (ws, req) => {
 
 // Admin views follow every device at 5 Hz.
 setInterval(() => room.broadcastDevices(), 200).unref();
+// Phones' member lists: online / live state changes with time, not messages.
+setInterval(() => room.broadcastPeers(), 2000).unref();
 
 // Tunnels and mobile networks silently drop idle sockets; ping to detect them.
 setInterval(() => {

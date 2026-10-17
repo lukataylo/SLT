@@ -35,8 +35,11 @@ function cleanName(name, fallback) {
 // room aligns each one to the shared floor plan and converts its poses before
 // relaying them. Until a LiDAR peer is aligned, its poses and frames are held back.
 export class Room {
-  constructor({ recorder = null, now = Date.now, map = new LiveMap() } = {}) {
+  constructor({ recorder = null, now = Date.now, map = new LiveMap(), archive = null } = {}) {
     this.map = map;
+    // Called with the map before a new group wipes it, so nothing is lost.
+    this.archive = archive;
+    this.lastPeersSignature = '';
     this.peers = new Map();
     this.admins = new Map();
     // QR pairing codes on display: code -> { peerId, name, m, at }.
@@ -58,7 +61,7 @@ export class Room {
     }
     const peer = { id, name: cleanName(name, id), socket, pose: null, lastFrame: null, lastFrameAt: 0, lastSeenAt: this.now() };
     if (frame === 'local') {
-      Object.assign(peer, { local: true, alignment: null, localWalls: [], localOpenings: [], localFloor: [], floorY: null, roomId: null });
+      Object.assign(peer, { local: true, alignment: null, localWalls: [], localOpenings: [], localFloor: [], floorY: null, roomId: null, role: 'move', creating: false });
     }
     this.sendJson(peer, { t: 'welcome', id, name: peer.name, peers: this.snapshot(id), map: this.map.toJSON() });
     for (const other of this.peers.values()) {
@@ -66,6 +69,7 @@ export class Room {
     }
     this.peers.set(id, peer);
     this.broadcastJson({ t: 'join', id, name: peer.name }, id);
+    this.broadcastPeers();
     return id;
   }
 
@@ -76,6 +80,7 @@ export class Room {
     for (const [code, shown] of this.pairingCodes) if (shown.peerId === id) this.pairingCodes.delete(code);
     this.peers.delete(id);
     this.broadcastJson({ t: 'leave', id }, id);
+    this.broadcastPeers();
     if (peer.alignment) {
       this.map.commit(id);
       this.broadcastMap();
@@ -126,10 +131,71 @@ export class Room {
       const text = JSON.stringify({ t: 'collab', from: id, data: msg.data });
       for (const p of this.peers.values()) if (p.local && p.id !== id && p.socket.readyState === OPEN) p.socket.send(text);
     } else if (msg?.t === 'pair' && peer.local) {
-      this.pairPeer(peer, msg.alignment);
+      this.pairPeer(peer, msg.alignment, msg.resume);
     } else if (msg?.t === 'pairing' && peer.local) {
       this.pairingMessage(peer, msg);
+    } else if (msg?.t === 'group' && peer.local && msg.action === 'create') {
+      this.createGroup(peer);
+    } else if (msg?.t === 'group' && peer.local && msg.action === 'cancel') {
+      peer.creating = false;
+      this.broadcastPeers();
+    } else if (msg?.t === 'role' && peer.local) {
+      const target = this.peers.get(msg.id);
+      if (target?.local && (msg.role === 'still' || msg.role === 'move')) {
+        target.role = msg.role;
+        this.broadcastPeers();
+      }
     }
+  }
+
+  // --- Groups ---------------------------------------------------------------
+  //
+  // A group is everyone on this server's map. Creating one starts a new space
+  // with this phone as its origin; the previous map is archived first. It is
+  // refused while another phone is already placed: join that group instead.
+
+  createGroup(peer) {
+    const active = [...this.peers.values()].find((p) => p !== peer && p.local && (p.alignment || p.creating));
+    if (active) return this.sendJson(peer, { t: 'group', error: 'active', by: active.name });
+    // A repeated request while still setting up changes nothing.
+    if (peer.creating && !this.map.origin) return this.sendJson(peer, { t: 'group', created: true });
+    if (this.map.origin || this.map.rooms.length) {
+      this.archive?.(this.map);
+      this.map.resetAll();
+      this.broadcastCloudReset(null);
+    }
+    this.pairingCodes.clear();
+    for (const p of this.peers.values()) {
+      if (!p.local) continue;
+      Object.assign(p, { alignment: null, roomId: null, pendingJump: null, creating: p === peer });
+      // Everyone hears they're unplaced, so "placed again" is a real change.
+      this.sendAlign(p, null);
+    }
+    peer.role = 'move';
+    this.sendJson(peer, { t: 'group', created: true });
+    this.broadcastMap();
+    this.broadcastPeers();
+    // Founding happens as soon as this phone reports its floor.
+    if (peer.floorY != null) this.alignPeer(peer);
+  }
+
+  /** Group members for the phones' lists and radar. Sent only when it changes. */
+  broadcastPeers(force = false) {
+    const now = this.now();
+    const peers = [...this.peers.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      kind: p.local ? 'lidar' : 'web',
+      role: p.role ?? 'move',
+      located: p.local ? !!p.alignment : true,
+      online: now - (p.lastSeenAt ?? 0) < LIVE_WINDOW_MS,
+      live: now - p.lastFrameAt < LIVE_WINDOW_MS,
+    }));
+    const signature = JSON.stringify(peers);
+    if (!force && signature === this.lastPeersSignature) return;
+    this.lastPeersSignature = signature;
+    const text = JSON.stringify({ t: 'peers', peers });
+    for (const p of this.peers.values()) if (p.local && p.socket.readyState === OPEN) p.socket.send(text);
   }
 
   // QR pairing. The phone showing a code streams where that code is on the
@@ -162,10 +228,13 @@ export class Room {
 
   // A phone whose ARKit session merged with an aligned phone's receives that
   // phone's map-origin anchor, and from it computes its own alignment exactly.
-  pairPeer(peer, a) {
+  pairPeer(peer, a, resume) {
     const valid = a && Number.isFinite(a.yaw) && Array.isArray(a.t) && a.t.length === 3 && a.t.every(Number.isFinite);
     if (!valid || !this.map.origin) return;
-    const vouched = peer.pairingWith || [...this.peers.values()].some((p) => p !== peer && p.local && p.alignment);
+    // A phone that reconnects keeps its ARKit session, so its old placement is
+    // still right, as long as the map is the same one (same founding).
+    const resuming = typeof resume === 'string' && resume === this.map.origin.at;
+    const vouched = resuming || peer.pairingWith || [...this.peers.values()].some((p) => p !== peer && p.local && p.alignment);
     if (!vouched) return;
     peer.alignment = { yaw: a.yaw, t: [...a.t] };
     peer.pendingJump = null;
@@ -173,7 +242,7 @@ export class Room {
     if (shower) this.sendJson(shower, { t: 'pairing', action: 'done', by: peer.name });
     peer.pairingWith = null;
     if (!peer.roomId || !this.map.room(peer.roomId)) peer.roomId = this.map.roomAt(transformPoint2(0, 0, peer.alignment))?.id ?? null;
-    this.sendAlign(peer, { method: 'paired', correction: 'locked' });
+    this.sendAlign(peer, { method: resume ? 'resumed' : 'paired', correction: 'locked' });
     this.broadcastMap();
   }
 
@@ -181,10 +250,12 @@ export class Room {
 
   roomCommand(peer, msg) {
     if (msg.action === 'reset-map') {
+      if (this.map.origin || this.map.rooms.length) this.archive?.(this.map);
       this.map.resetAll();
+      this.pairingCodes.clear();
       for (const p of this.peers.values()) {
         if (!p.local) continue;
-        Object.assign(p, { alignment: null, roomId: null, pendingJump: null });
+        Object.assign(p, { alignment: null, roomId: null, pendingJump: null, creating: false });
         this.sendJson(p, { t: 'reset', scope: 'map' });
         this.sendAlign(p, null);
       }
@@ -277,12 +348,19 @@ export class Room {
     const floorDy = -peer.floorY;
     let result = null;
     const anyoneElseAligned = [...this.peers.values()].some((p) => p !== peer && p.alignment);
-    if (!this.map.origin && !peer.alignment && !anyoneElseAligned) {
+    if (!this.map.origin && !peer.alignment && !anyoneElseAligned && peer.creating) {
       // No fixed origin yet: this phone founds the map frame where it stands,
       // grounded on its floor. The origin is saved and never re-founded.
       this.map.found({ by: peer.name, at: new Date(this.now()).toISOString() });
       peer.alignment = { yaw: 0, t: [0, floorDy, 0] };
+      peer.creating = false;
       result = { method: 'origin', correction: 'locked' };
+    } else if (peer.role === 'still' && peer.alignment) {
+      // Still phones are pinned: they don't move, so they never need correcting,
+      // and a bad wall match must not drag the anchor everyone relies on.
+      result = { method: 'pinned', correction: 'none' };
+    } else if (!this.map.origin) {
+      result = { method: 'waiting', correction: 'none' };
     } else {
       const anchors = this.map.anchorsFor(peer.id);
       const fit = anchors.length ? register(peer.localWalls, anchors, { initial: peer.alignment }) : null;
@@ -340,6 +418,7 @@ export class Room {
   }
 
   sendAlign(peer, result) {
+    this.broadcastPeers();
     this.sendJson(peer, {
       t: 'align',
       aligned: !!peer.alignment,

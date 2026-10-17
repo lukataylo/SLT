@@ -38,6 +38,16 @@ struct RemoteFeed {
     var receivedAt: Date
 }
 
+/// A phone in the group, as the server lists it.
+struct Member: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var role: String // "move" | "still"
+    var located: Bool
+    var online: Bool
+    var live: Bool
+}
+
 /// WebSocket link to the relay. Connects with `frame=local`, so the server
 /// treats this phone's poses as ARKit-frame and aligns them using its walls.
 @MainActor
@@ -52,6 +62,11 @@ final class RelayClient: ObservableObject {
     }
 
     @Published private(set) var connected = false
+    /// This phone's id on the server, and everyone in the group (including us).
+    @Published private(set) var selfId: String?
+    @Published private(set) var members: [Member] = []
+    /// Reply to "create a group": nil, or who already runs an active group.
+    @Published private(set) var groupBlockedBy: String?
     @Published private(set) var peers = 0
     @Published private(set) var rooms: [MapRoom] = []
     @Published private(set) var roomId: String?
@@ -81,6 +96,10 @@ final class RelayClient: ObservableObject {
     private let decodeQueue = DispatchQueue(label: "slt.feeds", qos: .userInitiated)
 
     private var task: URLSessionWebSocketTask?
+    private var pendingCreate = false
+    /// Our placement from before a reconnect, and the map it belongs to.
+    private var resumable: (alignment: FloorTransform, originAt: String)?
+    private var originAt: String?
     private var target: (server: URL, name: String)?
     private var framesInFlight = 0
     private static let maxFramesInFlight = 2
@@ -168,6 +187,22 @@ final class RelayClient: ObservableObject {
         sendText(message)
     }
 
+    /// Sent as soon as there's a connection: a create sent while reconnecting
+    /// (e.g. right after a name change) would otherwise be lost.
+    func createGroup() {
+        groupBlockedBy = nil
+        if connected { sendText(["t": "group", "action": "create"]) } else { pendingCreate = true }
+    }
+
+    func cancelCreate() {
+        pendingCreate = false
+        sendText(["t": "group", "action": "cancel"])
+    }
+
+    func setRole(_ role: String, for id: String) {
+        sendText(["t": "role", "id": id, "role": role])
+    }
+
     func switchRoom(_ id: String) { sendText(["t": "room", "action": "switch", "roomId": id]) }
     func resetRoom() { sendText(["t": "room", "action": "reset-room"]) }
     func resetMap() { sendText(["t": "room", "action": "reset-map"]) }
@@ -189,11 +224,15 @@ final class RelayClient: ObservableObject {
         components.path = "/ws"
         components.queryItems = [URLQueryItem(name: "name", value: name), URLQueryItem(name: "frame", value: "local")]
         guard let url = components.url else { return }
-        // A new connection is a new peer on the server: nothing carries over.
+        // A new connection is a new peer on the server. Our ARKit session hasn't
+        // changed, though, so remember our placement to resume it on welcome.
+        if alignment.aligned, let originAt { resumable = (alignment.transform, originAt) }
         alignment = Alignment(aligned: false, method: nil, match: nil, ambiguous: false, needsFloor: true)
         roomId = nil
         feeds = [:]
         peerMarks = [:]
+        members = []
+        selfId = nil
         feedsVersion += 1
         let task = URLSession.shared.webSocketTask(with: url)
         task.maximumMessageSize = 16 * 1024 * 1024
@@ -232,7 +271,24 @@ final class RelayClient: ObservableObject {
               let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = msg["t"] as? String else { return }
         switch type {
+        case "peers":
+            members = (msg["peers"] as? [[String: Any]] ?? []).compactMap { p in
+                guard let id = p["id"] as? String, (p["kind"] as? String) == "lidar" else { return nil }
+                return Member(id: id, name: p["name"] as? String ?? id, role: p["role"] as? String ?? "move",
+                              located: p["located"] as? Bool ?? false, online: p["online"] as? Bool ?? true, live: p["live"] as? Bool ?? false)
+            }
+        case "group":
+            if msg["error"] as? String == "active" { groupBlockedBy = msg["by"] as? String ?? "Someone" }
         case "welcome":
+            selfId = msg["id"] as? String
+            if pendingCreate {
+                pendingCreate = false
+                sendText(["t": "group", "action": "create"])
+            } else if let r = resumable {
+                sendText(["t": "pair", "resume": r.originAt,
+                          "alignment": ["yaw": Double(r.alignment.yaw), "t": [Double(r.alignment.tx), Double(r.alignment.ty), Double(r.alignment.tz)]]])
+            }
+            resumable = nil
             let list = msg["peers"] as? [[String: Any]] ?? []
             peers = list.count
             peerMarks = [:]
@@ -269,7 +325,10 @@ final class RelayClient: ObservableObject {
         case "reset":
             onReset?(msg["scope"] as? String == "map")
         case "align":
-            if let origin = msg["origin"] as? [String: Any] { originFoundedBy = origin["by"] as? String }
+            if let origin = msg["origin"] as? [String: Any] {
+                originFoundedBy = origin["by"] as? String
+                originAt = origin["at"] as? String
+            }
             roomId = msg["roomId"] as? String
             let a = msg["alignment"] as? [String: Any]
             let t = (a?["t"] as? [Double]) ?? [0, 0, 0]
@@ -298,12 +357,16 @@ final class RelayClient: ObservableObject {
               let q = meta["q"] as? [Double], q.count == 4 else { return }
         let jpeg = data.subdata(in: data.startIndex + 2 + metaLen ..< data.endIndex)
         let name = names[id] ?? id
+        let orientation = simd_quatf(ix: Float(q[0]), iy: Float(q[1]), iz: Float(q[2]), r: Float(q[3]))
         decodeQueue.async {
-            guard let image = UIImage(data: jpeg)?.preparingForDisplay() else { return }
+            guard let decoded = UIImage(data: jpeg)?.preparingForDisplay(), let cg = decoded.cgImage else { return }
+            // Frames arrive in the camera sensor's landscape orientation; turn
+            // them the way the sender is holding their phone, so they're upright.
+            let image = UIImage(cgImage: cg, scale: 1, orientation: Self.uprightOrientation(orientation))
             let feed = RemoteFeed(
                 name: name,
                 position: SIMD3(Float(p[0]), Float(p[1]), Float(p[2])),
-                orientation: simd_quatf(ix: Float(q[0]), iy: Float(q[1]), iz: Float(q[2]), r: Float(q[3])),
+                orientation: orientation,
                 vfov: Float(meta["fov"] as? Double ?? 50),
                 aspect: Float(meta["aspect"] as? Double ?? 4.0 / 3),
                 image: image,
@@ -316,8 +379,25 @@ final class RelayClient: ObservableObject {
         }
     }
 
+    /// Which quarter-turn makes a frame upright, from how the camera that took
+    /// it was held: where world "up" falls in the image (x right, y up).
+    nonisolated static func uprightOrientation(_ q: simd_quatf) -> UIImage.Orientation {
+        let up = SIMD3<Float>(0, 1, 0)
+        let xUp = simd_dot(q.act(SIMD3(1, 0, 0)), up)
+        let yUp = simd_dot(q.act(SIMD3(0, 1, 0)), up)
+        // Clockwise quarter-turns needed to bring "up" to the top.
+        let turns = Int((-atan2(xUp, yUp) / (.pi / 2)).rounded())
+        switch ((turns % 4) + 4) % 4 {
+        case 1: return .right
+        case 2: return .down
+        case 3: return .left
+        default: return .up
+        }
+    }
+
     private func applyMap(_ map: [String: Any]) {
         originFoundedBy = (map["origin"] as? [String: Any])?["by"] as? String
+        originAt = (map["origin"] as? [String: Any])?["at"] as? String
         rooms = (map["rooms"] as? [[String: Any]] ?? []).compactMap(Self.room)
         plan = (map["plan"] as? [String: Any]).flatMap(Self.plan)
     }
@@ -419,6 +499,14 @@ extension RelayClient {
                                    vfov: 50, aspect: 4 / 3, image: image, receivedAt: .distantFuture)
         }
         feedsVersion += 1
+        selfId = "p1"
+        members = [Member(id: "p1", name: "Luka", role: "move", located: located, online: true, live: true),
+                   Member(id: "p2", name: "Ben", role: "still", located: true, online: true, live: true),
+                   Member(id: "p3", name: "Cy", role: "move", located: true, online: true, live: true)]
+    }
+
+    func loadDemoStill() {
+        if let i = members.firstIndex(where: { $0.id == selfId }) { members[i].role = "still" }
     }
 }
 #endif

@@ -103,6 +103,7 @@ const ROOM = [
   [0, 4, 0, 0],
   [2, 0, 2, 1.5],
 ];
+const CREATE = JSON.stringify({ t: 'group', action: 'create' });
 const planes = (walls, floorY = -1.3) => JSON.stringify({ t: 'planes', walls, floorY });
 const last = (sock, type) => sock.json.filter((m) => m.t === type).at(-1);
 
@@ -115,6 +116,8 @@ test('the first LiDAR phone defines the map frame and seeds the floor plan', () 
 
   room.handleFrame(id, encodeFrame(pose, jpeg));
   assert.equal(viewer.frames.length, 0, 'unaligned frames are held back');
+
+  room.handleText(id, CREATE);
 
   room.handleText(id, planes(ROOM));
   const align = last(phone, 'align');
@@ -132,6 +135,7 @@ test('a second LiDAR phone is aligned to the map from the walls it sees', () => 
   const room = new Room({ now: () => 1000 });
   const first = new FakeSocket();
   const idA = room.join(first, { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
 
   // Phone B tracks in its own frame: turned 90° and offset from phone A's.
@@ -154,6 +158,7 @@ test('a second LiDAR phone is aligned to the map from the walls it sees', () => 
 test('a LiDAR phone that sees too little stays unaligned and silent', () => {
   const room = new Room({ now: () => 1000 });
   const idA = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
   const viewer = new FakeSocket();
   room.join(viewer, { name: 'web' });
@@ -168,6 +173,7 @@ test('a LiDAR phone that sees too little stays unaligned and silent', () => {
 test("a leaving phone's walls stay in the map", () => {
   const room = new Room({ now: () => 1000 });
   const idA = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
   room.leave(idA);
   assert.equal(room.map.walls.length, ROOM.length);
@@ -176,6 +182,7 @@ test("a leaving phone's walls stay in the map", () => {
 
 test('browser peers cannot send planes', () => {
   const { room, idA } = setup();
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
   assert.equal(room.map.walls.length, 0);
 });
@@ -185,6 +192,7 @@ test('browser peers cannot send planes', () => {
 test('the origin is founded once and survives a restart', () => {
   const first = new Room({ now: () => 1000 });
   const idA = first.join(new FakeSocket(), { name: 'Founder', frame: 'local' });
+  first.handleText(idA, CREATE);
   first.handleText(idA, planes(ROOM));
   first.leave(idA);
   const saved = JSON.parse(JSON.stringify(first.map.toFile()));
@@ -207,6 +215,7 @@ test('a phone founds the map from the floor alone, no walls needed', () => {
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, planes([]));
   assert.equal(room.map.origin.by, 'A');
   assert.equal(last(phone, 'align').aligned, true);
@@ -229,6 +238,8 @@ test('pairing: collaboration data is relayed between LiDAR phones and a paired p
   room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 1, t: [2, 1.3, 3] } }));
   assert.equal(last(b, 'align'), undefined, 'no map yet, nothing to pair into');
 
+  room.handleText(idA, CREATE);
+
   room.handleText(idA, planes(ROOM));
   room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 1, t: [2, 1.3, 3] } }));
   const align = last(b, 'align');
@@ -242,6 +253,8 @@ test('walls confirmed by more sessions gain weight', () => {
   const room = new Room();
   for (const name of ['A', 'B', 'C']) {
     const id = room.join(new FakeSocket(), { name, frame: 'local' });
+    // Only the first creates the group; later sessions re-confirm its walls.
+    if (name === 'A') room.handleText(id, CREATE);
     room.handleText(id, planes(ROOM));
     room.leave(id);
   }
@@ -251,6 +264,7 @@ test('walls confirmed by more sessions gain weight', () => {
 test('placed phones take small blended corrections and resist one-off jumps', () => {
   const room = new Room();
   const idA = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'B', frame: 'local' });
@@ -279,6 +293,7 @@ test('a phone must find the floor before it can found or join the map', () => {
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, JSON.stringify({ t: 'planes', walls: ROOM }));
   assert.equal(last(phone, 'align').needsFloor, true);
   assert.equal(room.map.origin, null);
@@ -291,6 +306,7 @@ test('doors, windows and the floor outline land in the phone\'s room', () => {
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, JSON.stringify({
     t: 'planes', walls: ROOM, floorY: -1.3,
     openings: [{ kind: 'door', s: [3, 4, 3.9, 4], y0: -1.3, y1: 0.7 }, { kind: 'bogus', s: [0, 0, 1, 0], y0: 0, y1: 1 }],
@@ -307,6 +323,7 @@ test('a new room starts at the phone and keeps earlier walls in the old room', (
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, planes(ROOM));
   room.handleText(id, JSON.stringify({ t: 'pose', p: [4, 0.1, 2], q: [0, 0, 0, 1] }));
   room.handleText(id, JSON.stringify({ t: 'room', action: 'new', name: 'Kitchen' }));
@@ -324,6 +341,7 @@ test('resetting a room clears it; resetting the map clears the origin and alignm
   const room = new Room();
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, planes(ROOM));
   room.handleText(id, JSON.stringify({ t: 'room', action: 'reset-room' }));
   assert.equal(room.map.toJSON().rooms[0].walls.length, 0);
@@ -344,6 +362,8 @@ test('admins get a snapshot, map updates, devices and cloud deltas; peers never 
   const phone = new FakeSocket();
   const id = room.join(phone, { name: 'A', frame: 'local' });
   assert.equal(phone.json[0].peers.length, 0, 'admin is invisible to peers');
+
+  room.handleText(id, CREATE);
 
   room.handleText(id, planes(ROOM));
   assert.ok(last(admin, 'map'));
@@ -381,6 +401,7 @@ test('an uploaded plan is placed onto the scan automatically', () => {
   });
   room.map.setPlan({ id: 'plan1', name: 'Flat', rooms: [{ id: 'pr1', name: 'Lounge', polygon: poly }], placement: null });
   const id = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, planes(L.map((p, i) => [...p, ...L[(i + 1) % L.length]])));
   const placement = room.map.plan.placement;
   assert.ok(placement, 'placed');
@@ -402,6 +423,8 @@ test('QR pairing: a shown code can be claimed once fresh, and the shower hears w
   room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'claim', code: 'abc' }));
   assert.equal(last(b, 'pairing').action, 'unknown', 'an unplaced phone cannot show a code');
 
+  room.handleText(idA, CREATE);
+
   room.handleText(idA, planes(ROOM));
   room.handleText(idA, JSON.stringify({ t: 'pairing', action: 'show', code: 'abc', m }));
   room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'claim', code: 'abc' }));
@@ -419,6 +442,7 @@ test('rooms can be renamed and linked to a plan room', () => {
   const room = new Room();
   room.map.setPlan({ id: 'p', name: 'Plan', rooms: [{ id: 'pr1', name: 'Lounge', polygon: [[0, 0], [1, 0], [1, 1]] }], placement: null });
   const id = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(id, CREATE);
   room.handleText(id, planes(ROOM));
   room.handleText(id, JSON.stringify({ t: 'room', action: 'rename', roomId: 'r1', name: 'Living room', planRoomId: 'pr1' }));
   assert.deepEqual([room.map.rooms[0].name, room.map.rooms[0].planRoomId], ['Living room', 'pr1']);
@@ -430,6 +454,7 @@ test('pair needs a claim or another located phone, and codes cannot be hijacked'
   const room = new Room();
   const a = new FakeSocket();
   const idA = room.join(a, { name: 'A', frame: 'local' });
+  room.handleText(idA, CREATE);
   room.handleText(idA, planes(ROOM));
   room.leave(idA);
 
@@ -445,4 +470,105 @@ test('pair needs a claim or another located phone, and codes cannot be hijacked'
   room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'show', code: 'x', m }));
   room.handleText(idL, JSON.stringify({ t: 'pairing', action: 'show', code: 'x', m: m.map((v) => v * 2) }));
   assert.deepEqual(room.pairingCodes.get('x').m, m, 'only the owner can update a code');
+});
+
+// --- Groups (version C) -----------------------------------------------------
+
+test('a phone that only joins can never found a map; creating one can', () => {
+  const room = new Room();
+  const joiner = new FakeSocket();
+  const idJ = room.join(joiner, { name: 'Tom', frame: 'local' });
+  room.handleText(idJ, planes(ROOM));
+  assert.equal(room.map.origin, null);
+  assert.equal(last(joiner, 'align').aligned, false);
+
+  const creator = new FakeSocket();
+  const idC = room.join(creator, { name: 'Luka', frame: 'local' });
+  room.handleText(idC, CREATE);
+  assert.deepEqual(last(creator, 'group'), { t: 'group', created: true });
+  room.handleText(idC, planes(ROOM));
+  assert.equal(room.map.origin.by, 'Luka');
+});
+
+test('creating a group archives the old map, and is refused while a group is active', () => {
+  const archived = [];
+  const room = new Room({ archive: (map) => archived.push(map.toFile()) });
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'Luka', frame: 'local' });
+  room.handleText(idA, CREATE);
+  room.handleText(idA, planes(ROOM));
+  assert.equal(archived.length, 0, 'nothing to archive on an empty map');
+
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'Tom', frame: 'local' });
+  room.handleText(idB, CREATE);
+  assert.deepEqual(last(b, 'group'), { t: 'group', error: 'active', by: 'Luka' });
+  assert.equal(room.map.origin.by, 'Luka', 'the active group is untouched');
+
+  room.leave(idA);
+  room.handleText(idB, CREATE);
+  assert.equal(archived.length, 1, 'the old map is archived before the wipe');
+  assert.equal(archived[0].origin.by, 'Luka');
+  assert.equal(room.map.origin, null);
+});
+
+test('roles can be set for any phone, members are listed, and still phones are pinned', () => {
+  const room = new Room();
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'Luka', frame: 'local' });
+  room.handleText(idA, CREATE);
+  room.handleText(idA, planes(ROOM));
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'Tom', frame: 'local' });
+  room.handleText(idB, planes(ROOM));
+  assert.equal(last(b, 'align').aligned, true);
+
+  room.handleText(idA, JSON.stringify({ t: 'role', id: idB, role: 'still' }));
+  const tom = last(a, 'peers').peers.find((p) => p.id === idB);
+  assert.deepEqual([tom.name, tom.role, tom.located], ['Tom', 'still', true]);
+  room.handleText(idA, JSON.stringify({ t: 'role', id: idB, role: 'admin' }));
+  assert.equal(room.peers.get(idB).role, 'still', 'unknown roles are ignored');
+
+  // A pinned phone keeps its placement even when its walls now suggest a jump.
+  const before = JSON.stringify(room.peers.get(idB).alignment);
+  const shifted = ROOM.map((s) => transformSegment(s, { yaw: 0, t: [-2, 0, 0] }));
+  for (let i = 0; i < 4; i++) room.handleText(idB, planes(shifted));
+  assert.equal(JSON.stringify(room.peers.get(idB).alignment), before);
+  assert.equal(last(b, 'align').method, 'pinned');
+});
+
+test('review fixes: no double create, everyone hears the wipe, codes cleared, cancel, resume after reconnect', () => {
+  const room = new Room();
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'Luka', frame: 'local' });
+  room.handleText(idA, CREATE);
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'Tom', frame: 'local' });
+  room.handleText(idB, CREATE);
+  assert.deepEqual(last(b, 'group'), { t: 'group', error: 'active', by: 'Luka' }, 'refused while Luka is still setting up');
+  room.handleText(idA, CREATE);
+  assert.deepEqual(last(a, 'group'), { t: 'group', created: true }, 'a repeated create is harmless');
+
+  room.handleText(idA, JSON.stringify({ t: 'group', action: 'cancel' }));
+  room.handleText(idA, planes(ROOM));
+  assert.equal(room.map.origin, null, 'cancelled: the floor no longer founds a map');
+
+  room.handleText(idA, CREATE);
+  room.handleText(idA, planes(ROOM));
+  const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  room.handleText(idA, JSON.stringify({ t: 'pairing', action: 'show', code: 'old', m }));
+  room.leave(idA);
+  room.handleText(idB, CREATE);
+  assert.equal(room.pairingCodes.size, 0, 'old codes are gone with the old map');
+  room.handleText(idB, planes(ROOM));
+  const at = room.map.origin.at;
+
+  // Tom's connection drops and comes back: he resumes with his old placement.
+  room.leave(idB);
+  const b2 = new FakeSocket();
+  const idB2 = room.join(b2, { name: 'Tom', frame: 'local' });
+  room.handleText(idB2, JSON.stringify({ t: 'pair', alignment: { yaw: 0, t: [0, 1.3, 0] }, resume: 'not-this-map' }));
+  assert.equal(last(b2, 'align'), undefined, 'a different map is not resumed');
+  room.handleText(idB2, JSON.stringify({ t: 'pair', alignment: { yaw: 0, t: [0, 1.3, 0] }, resume: at }));
+  assert.equal(last(b2, 'align').method, 'resumed');
 });

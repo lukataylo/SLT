@@ -35,11 +35,14 @@ final class Settings: ObservableObject {
     }
 }
 
-/// App flow: a home screen; SCAN (one-off setup of rooms, building the
-/// splat map); SEE THROUGH (live x-ray of other phones); pairing by QR.
+/// App flow (version C, "Radar"): Start (name, create or join a group) →
+/// create: find the floor; join: scan any member's code → the group list
+/// (who's where, Still or Move) → Live: a radar of everyone, their views
+/// docked at the screen edge, locking on when you face them. SCAN (building
+/// the 3D map) stays available from Settings.
 @MainActor
 final class AppModel: ObservableObject {
-    enum Mode: Equatable { case home, scan, seeThrough, pairScan }
+    enum Mode: Equatable { case start, creating, group, live, scan, pairScan }
     enum Sheet: String, Identifiable { case rooms, showCode, settings; var id: String { rawValue } }
 
     /// The room the user chose to scan: an existing one, or a new one.
@@ -57,12 +60,13 @@ final class AppModel: ObservableObject {
     let relay = RelayClient()
     let settings = Settings()
 
-    @Published var mode: Mode = .home { didSet { applyMode() } }
+    @Published var mode: Mode = .start { didSet { applyMode() } }
     @Published var sheet: Sheet?
     @Published var roomIntent: RoomIntent?
     @Published var scanState: ScanState = .looking
-    /// Mode to return to after scanning a pairing code.
-    private var afterPairing: Mode = .home
+    /// Where to go after scanning a pairing code, and on cancelling it.
+    private var afterPairing: Mode = .group
+    private var onCancelPairing: Mode = .start
     private var claimedCode: PairingPayload?
     private var lastClaim = Date.distantPast
     private var codePoseInOurFrame: simd_float4x4?
@@ -74,6 +78,8 @@ final class AppModel: ObservableObject {
 
     var isLocated: Bool { relay.alignment.aligned }
     var mapExists: Bool { relay.originFoundedBy != nil }
+    var me: Member? { relay.members.first { $0.id == relay.selfId } }
+    var isStill: Bool { me?.role == "still" }
 
     private var started = false
 
@@ -96,7 +102,8 @@ final class AppModel: ObservableObject {
         relay.onCollaboration = { [capture] data in capture.receiveCollaboration(data) }
         relay.onReset = { [capture] restart in capture.reset(restartTracking: restart) }
         capture.onPeerMapOrigin = { [weak self] alignment in
-            guard let self, !self.isLocated, Date().timeIntervalSince(self.lastOriginPair) > 1 else { return }
+            guard let self, !self.isLocated, ![.start, .creating].contains(self.mode),
+                  Date().timeIntervalSince(self.lastOriginPair) > 1 else { return }
             self.lastOriginPair = Date()
             self.relay.pair(alignment)
         }
@@ -110,7 +117,21 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 Haptics.success()
                 self.applyRoomIntent()
-                if case .measuring(let by) = self.scanState { self.finishPairing(by: by) }
+            }
+        }.store(in: &bag)
+        // Every placement message, not just the first: a phone that was
+        // already placed must still move on when it founds or pairs.
+        relay.$alignment.sink { [weak self] a in
+            DispatchQueue.main.async {
+                guard let self, a.aligned else { return }
+                if self.mode == .creating && a.method == "origin" { self.mode = .group }
+                if case .measuring(let by) = self.scanState, a.method == "paired" { self.finishPairing(by: by) }
+            }
+        }.store(in: &bag)
+        // Someone else's group is running: back to Start, which says so.
+        relay.$groupBlockedBy.sink { [weak self] blocked in
+            DispatchQueue.main.async {
+                if blocked != nil, self?.mode == .creating { self?.mode = .start }
             }
         }.store(in: &bag)
         relay.$alignment.sink { [weak self] a in
@@ -131,10 +152,44 @@ final class AppModel: ObservableObject {
     }
 
     private func applyMode() {
-        capture.sendFrames = mode == .seeThrough && settings.shareCamera
+        // Everyone in Live streams; Move phones also look through to the rest.
+        capture.sendFrames = mode == .live && settings.shareCamera
         capture.sendCloud = mode == .scan && settings.captureColour
         capture.detectQR = mode == .pairScan
         if mode != .pairScan { capture.stopTrackingCodes() }
+    }
+
+    // MARK: group
+
+    func createGroup() {
+        relay.createGroup()
+        mode = .creating
+    }
+
+    func cancelCreate() {
+        relay.cancelCreate()
+        mode = .start
+    }
+
+    /// "Start a new map here" while scanning: a new group, founded by this phone.
+    func startNewMapHere() {
+        relay.createGroup()
+    }
+
+    func joinGroup() {
+        scanCode(returnTo: .group, cancelTo: .start)
+    }
+
+    func setRole(_ role: String, for id: String) {
+        relay.setRole(role, for: id)
+        Haptics.tap()
+    }
+
+    /// Leaving drops this phone's place: a new connection is a new member.
+    func leaveGroup() {
+        sheet = nil
+        mode = .start
+        connect()
     }
 
     // MARK: scanning
@@ -166,8 +221,9 @@ final class AppModel: ObservableObject {
 
     // MARK: pairing by QR
 
-    func scanCode(returnTo: Mode) {
+    func scanCode(returnTo: Mode, cancelTo: Mode? = nil) {
         afterPairing = returnTo
+        onCancelPairing = cancelTo ?? returnTo
         claimedCode = nil
         codePoseInOurFrame = nil
         pairSent = false
@@ -177,7 +233,7 @@ final class AppModel: ObservableObject {
     }
 
     func cancelPairing() {
-        mode = afterPairing
+        mode = onCancelPairing
         scanState = .looking
     }
 
@@ -254,13 +310,17 @@ final class AppModel: ObservableObject {
         relay.loadDemo(located: screen != "locate", withMap: !fresh)
         capture.loadDemo(floor: !fresh)
         switch screen {
-        case "rooms": sheet = .rooms
-        case "settings": sheet = .settings
-        case "code": sheet = .showCode
+        case "fresh": mode = .start
+        case "creating": mode = .creating
+        case "group": mode = .group
+        case "live": mode = .live
+        case "still": relay.loadDemoStill(); mode = .live
+        case "rooms": mode = .group; sheet = .rooms
+        case "settings": mode = .group; sheet = .settings
+        case "code": mode = .group; sheet = .showCode
         case "scan", "locate": roomIntent = RoomIntent(existingId: "r1", name: "Living", planRoomId: "pr1"); mode = .scan
-        case "see": mode = .seeThrough
         case "pairscan": mode = .pairScan; scanState = .reading("abc")
-        default: break
+        default: mode = .group
         }
     }
     #endif
@@ -268,6 +328,6 @@ final class AppModel: ObservableObject {
     func resetMap() {
         relay.resetMap()
         roomIntent = nil
-        mode = .home
+        mode = .start
     }
 }
