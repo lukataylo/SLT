@@ -142,6 +142,11 @@ export class Room {
     if (msg.action === 'show') {
       const m = msg.m;
       if (!peer.alignment || !Array.isArray(m) || m.length !== 16 || !m.every(Number.isFinite)) return;
+      const existing = this.pairingCodes.get(code);
+      if (existing && existing.peerId !== peer.id) return; // someone else's code
+      // Codes expire; keep the table small.
+      for (const [c, shown] of this.pairingCodes) if (this.now() - shown.at > PAIRING_CODE_TTL_MS) this.pairingCodes.delete(c);
+      if (!existing && this.pairingCodes.size >= 100) return;
       this.pairingCodes.set(code, { peerId: peer.id, name: peer.name, m, at: this.now() });
     } else if (msg.action === 'hide') {
       if (this.pairingCodes.get(code)?.peerId === peer.id) this.pairingCodes.delete(code);
@@ -160,6 +165,8 @@ export class Room {
   pairPeer(peer, a) {
     const valid = a && Number.isFinite(a.yaw) && Array.isArray(a.t) && a.t.length === 3 && a.t.every(Number.isFinite);
     if (!valid || !this.map.origin) return;
+    const vouched = peer.pairingWith || [...this.peers.values()].some((p) => p !== peer && p.local && p.alignment);
+    if (!vouched) return;
     peer.alignment = { yaw: a.yaw, t: [...a.t] };
     peer.pendingJump = null;
     const shower = peer.pairingWith && this.peers.get(peer.pairingWith);

@@ -425,3 +425,24 @@ test('rooms can be renamed and linked to a plan room', () => {
   room.handleText(id, JSON.stringify({ t: 'room', action: 'rename', roomId: 'r1', planRoomId: 'nope' }));
   assert.equal(room.map.rooms[0].planRoomId, null);
 });
+
+test('pair needs a claim or another located phone, and codes cannot be hijacked', () => {
+  const room = new Room();
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'A', frame: 'local' });
+  room.handleText(idA, planes(ROOM));
+  room.leave(idA);
+
+  const lone = new FakeSocket();
+  const idL = room.join(lone, { name: 'L', frame: 'local' });
+  room.handleText(idL, JSON.stringify({ t: 'pair', alignment: { yaw: 0, t: [0, 0, 0] } }));
+  assert.equal(last(lone, 'align'), undefined, 'nobody vouches for it');
+
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'B', frame: 'local' });
+  room.handleText(idB, planes(ROOM));
+  const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'show', code: 'x', m }));
+  room.handleText(idL, JSON.stringify({ t: 'pairing', action: 'show', code: 'x', m: m.map((v) => v * 2) }));
+  assert.deepEqual(room.pairingCodes.get('x').m, m, 'only the owner can update a code');
+});

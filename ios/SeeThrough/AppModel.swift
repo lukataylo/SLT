@@ -66,6 +66,10 @@ final class AppModel: ObservableObject {
     private var claimedCode: PairingPayload?
     private var lastClaim = Date.distantPast
     private var codePoseInOurFrame: simd_float4x4?
+    private var lastOriginPair = Date.distantPast
+    private var pairSent = false
+    /// A code that points at a different server waits for the user's OK.
+    @Published var pendingServerSwitch: PairingPayload?
     private var bag = Set<AnyCancellable>()
 
     var isLocated: Bool { relay.alignment.aligned }
@@ -92,17 +96,22 @@ final class AppModel: ObservableObject {
         relay.onCollaboration = { [capture] data in capture.receiveCollaboration(data) }
         relay.onReset = { [capture] restart in capture.reset(restartTracking: restart) }
         capture.onPeerMapOrigin = { [weak self] alignment in
-            guard let self, !self.isLocated else { return }
+            guard let self, !self.isLocated, Date().timeIntervalSince(self.lastOriginPair) > 1 else { return }
+            self.lastOriginPair = Date()
             self.relay.pair(alignment)
         }
         wirePairing()
 
         // Being placed on the map is the moment rooms and pairing unlock.
+        // @Published emits before the value is stored: defer so isLocated is current.
         relay.$alignment.map(\.aligned).removeDuplicates().sink { [weak self] aligned in
-            guard let self, aligned else { return }
-            Haptics.success()
-            self.applyRoomIntent()
-            if case .measuring(let by) = self.scanState { self.finishPairing(by: by) }
+            guard aligned else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                Haptics.success()
+                self.applyRoomIntent()
+                if case .measuring(let by) = self.scanState { self.finishPairing(by: by) }
+            }
         }.store(in: &bag)
         relay.$alignment.sink { [weak self] a in
             if a.aligned { self?.capture.publishMapOrigin(a.transform) }
@@ -161,6 +170,7 @@ final class AppModel: ObservableObject {
         afterPairing = returnTo
         claimedCode = nil
         codePoseInOurFrame = nil
+        pairSent = false
         scanState = .looking
         sheet = nil
         mode = .pairScan
@@ -173,16 +183,14 @@ final class AppModel: ObservableObject {
 
     private func wirePairing() {
         capture.onQRPayload = { [weak self] payload in
-            guard let self, self.claimedCode?.code != payload.code else { return }
-            // A code from another server: join it, so a new phone needs no setup.
+            guard let self, self.claimedCode?.code != payload.code, self.pendingServerSwitch == nil else { return }
+            // A code from another server could send this phone's camera
+            // anywhere: ask first, then join it.
             if payload.server.absoluteString != self.settings.server {
-                self.settings.server = payload.server.absoluteString
-                self.connect()
+                self.pendingServerSwitch = payload
+                return
             }
-            guard let reference = QRPairing.referenceImage(for: payload) else { return }
-            self.claimedCode = payload
-            self.scanState = .reading(payload.code)
-            self.capture.track(reference)
+            self.startTracking(payload)
         }
         capture.onCodePose = { [weak self] pose in
             guard let self, let code = self.claimedCode else { return }
@@ -193,14 +201,39 @@ final class AppModel: ObservableObject {
             }
         }
         relay.onPairingPose = { [weak self] codeOnMap, by in
-            guard let self, let ours = self.codePoseInOurFrame, self.mode == .pairScan else { return }
+            guard let self, let ours = self.codePoseInOurFrame, self.mode == .pairScan, !self.pairSent else { return }
+            self.pairSent = true
             self.scanState = .measuring(by)
             self.relay.pair(QRPairing.alignment(codeOnMap: codeOnMap, codeInOurFrame: ours))
-            if self.isLocated { self.finishPairing(by: by) }
         }
         relay.onPairingUnknown = { [weak self] in
             guard let self, self.mode == .pairScan else { return }
             self.scanState = .failed("That code has expired. Ask them to open their code again.")
+        }
+    }
+
+    func acceptServerSwitch(_ accept: Bool) {
+        guard let payload = pendingServerSwitch else { return }
+        pendingServerSwitch = nil
+        guard accept else { return cancelPairing() }
+        settings.server = payload.server.absoluteString
+        connect()
+        startTracking(payload)
+    }
+
+    private func startTracking(_ payload: PairingPayload) {
+        guard let reference = QRPairing.referenceImage(for: payload) else { return }
+        reference.validate { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if error != nil {
+                    self.scanState = .failed("The code couldn't be measured. Make the other screen brighter and try again.")
+                    return
+                }
+                self.claimedCode = payload
+                self.scanState = .reading(payload.code)
+                self.capture.track(reference)
+            }
         }
     }
 

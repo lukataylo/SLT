@@ -59,9 +59,16 @@ enum QRPairing {
         return CIContext().createCGImage(output, from: output.extent)
     }
 
+    /// ARKit needs more than one pixel per module to find features, so the
+    /// reference is scaled up with hard edges before use.
     static func referenceImage(for payload: PairingPayload) -> ARReferenceImage? {
-        guard let cg = image(for: payload.string) else { return nil }
-        let ref = ARReferenceImage(cg, orientation: .up, physicalWidth: CGFloat(payload.width))
+        guard let cg = image(for: payload.string),
+              let ctx = CGContext(data: nil, width: cg.width * 12, height: cg.height * 12, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        ctx.interpolationQuality = .none
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width * 12, height: cg.height * 12))
+        guard let big = ctx.makeImage() else { return nil }
+        let ref = ARReferenceImage(big, orientation: .up, physicalWidth: CGFloat(payload.width))
         ref.name = payload.code
         return ref
     }
@@ -69,8 +76,31 @@ enum QRPairing {
     /// Screen points to metres. Pixel density for the iPhone Pro Max class
     /// (≈460 ppi); a few percent off only shifts the result by centimetres.
     static func metres(points: CGFloat) -> Float {
-        let ppi: CGFloat = 460
-        return Float(points * UIScreen.main.nativeScale / ppi * 0.0254)
+        Float(points * UIScreen.main.nativeScale / Device.current.ppi * 0.0254)
+    }
+
+    /// Screen density and where the screen centre sits relative to the rear
+    /// wide camera, per model. Unknown models can scan codes but not show them.
+    struct Device {
+        var ppi: CGFloat
+        var screenCentreFromCamera: SIMD3<Float>
+
+        static let current: Device = {
+            var info = utsname()
+            uname(&info)
+            let id = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            return table[id] ?? Device(ppi: 0, screenCentreFromCamera: .zero)
+        }()
+
+        var known: Bool { ppi > 0 }
+
+        // (camera ~18 mm from the top and ~17 mm from the side, seen from the front)
+        private static let proMax = Device(ppi: 460, screenCentreFromCamera: SIMD3(0.064, -0.022, 0.009))
+        private static let pro = Device(ppi: 460, screenCentreFromCamera: SIMD3(0.057, -0.019, 0.008))
+        private static let table: [String: Device] = [
+            "iPhone18,2": proMax, "iPhone17,2": proMax, "iPhone16,2": proMax, "iPhone15,3": proMax,
+            "iPhone18,1": pro, "iPhone17,1": pro, "iPhone16,1": pro, "iPhone15,2": pro,
+        ]
     }
 
     /// Where the centre of the screen is relative to the rear wide camera, in
@@ -78,7 +108,7 @@ enum QRPairing {
     /// bottom edge, +y toward its right edge seen from the front, +z out of
     /// the screen). The camera sits near the top-right corner seen from the
     /// front; the screen is ~9 mm in front of the lens.
-    static let screenCentreFromCamera = SIMD3<Float>(0.064, -0.022, 0.009)
+    static var screenCentreFromCamera: SIMD3<Float> { Device.current.screenCentreFromCamera }
 
     /// Pose of the displayed code in camera space, given where its centre is
     /// on screen (points from the screen centre, x right, y down).
@@ -94,8 +124,14 @@ enum QRPairing {
     }
 
     /// B's alignment: the transform that puts B's view of the code onto A's.
+    /// Yaw from the full product, then the translation re-derived with that
+    /// yaw alone, so small tilt errors in measuring the code don't swing the
+    /// position by (tilt × distance from our session origin).
     static func alignment(codeOnMap: simd_float4x4, codeInOurFrame: simd_float4x4) -> FloorTransform {
-        FloorTransform(matrix: codeOnMap * codeInOurFrame.inverse)
+        let yaw = FloorTransform(matrix: codeOnMap * codeInOurFrame.inverse).yaw
+        let rotated = simd_quatf(angle: yaw, axis: SIMD3(0, 1, 0)).act(SIMD3(codeInOurFrame.columns.3.x, codeInOurFrame.columns.3.y, codeInOurFrame.columns.3.z))
+        let t = SIMD3(codeOnMap.columns.3.x, codeOnMap.columns.3.y, codeOnMap.columns.3.z) - rotated
+        return FloorTransform(yaw: yaw, tx: t.x, tz: t.z, ty: t.y)
     }
 
     static func columnMajor(_ m: simd_float4x4) -> [Double] {

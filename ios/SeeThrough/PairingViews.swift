@@ -13,7 +13,6 @@ struct ShowCodeView: View {
     @State private var codeCentre: CGPoint = .zero
     @State private var savedBrightness: CGFloat?
     private let codeSize: CGFloat = 250
-    private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     private var payload: PairingPayload? {
         relay.server.map { PairingPayload(server: $0, code: code, width: QRPairing.metres(points: codeSize)) }
@@ -26,7 +25,12 @@ struct ShowCodeView: View {
                 Spacer()
                 IconButton(glyph: .close, label: "Close") { dismiss() }
             }
-            if !relay.alignment.aligned {
+            if !QRPairing.Device.current.known {
+                Spacer()
+                Text("This phone model can scan codes but can't show one: its screen size isn't known, so the other phone couldn't be placed accurately.")
+                    .font(.system(size: 15)).foregroundStyle(Theme.muted)
+                Spacer()
+            } else if !relay.alignment.aligned {
                 Spacer()
                 VStack(alignment: .leading, spacing: 14) {
                     Text("THIS PHONE ISN'T LOCATED").font(Theme.display(24))
@@ -59,7 +63,14 @@ struct ShowCodeView: View {
         .padding(24)
         .background(Color.black.ignoresSafeArea())
         .presentationBackground(.black)
-        .onReceive(timer) { _ in publish() }
+        // A task, not a Timer in the view struct: the view is rebuilt many
+        // times a second while AR runs, which would keep restarting a timer.
+        .task {
+            while !Task.isCancelled {
+                publish()
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
         .onAppear {
             savedBrightness = UIScreen.main.brightness
             UIScreen.main.brightness = 1 // easier for the other camera to read
@@ -114,6 +125,14 @@ struct PairScanView: View {
             }
         }
         .padding(16)
+        .confirmationDialog("This code belongs to a different map server: \(model.pendingServerSwitch?.server.host ?? "")",
+                            isPresented: Binding(get: { model.pendingServerSwitch != nil }, set: { if !$0 { model.acceptServerSwitch(false) } }),
+                            titleVisibility: .visible) {
+            Button("Join that map") { model.acceptServerSwitch(true) }
+            Button("Cancel", role: .cancel) { model.acceptServerSwitch(false) }
+        } message: {
+            Text("Your camera view and scans will be shared there.")
+        }
     }
 
     private var frameColour: Color {

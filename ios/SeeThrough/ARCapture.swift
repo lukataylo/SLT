@@ -192,7 +192,8 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         let transform = alignment.matrix.inverse
         if let old = mapAnchor {
             let moved = simd_distance(old.transform.columns.3, transform.columns.3)
-            if moved < 0.05 && abs(FloorTransform(matrix: old.transform).yaw - FloorTransform(matrix: transform).yaw) < 0.02 { return }
+            let dyaw = FloorTransform(matrix: old.transform).yaw - FloorTransform(matrix: transform).yaw
+            if moved < 0.05 && abs(atan2(sin(dyaw), cos(dyaw))) < 0.02 { return }
             session.remove(anchor: old)
         }
         let anchor = ARAnchor(name: Self.mapAnchorName, transform: transform)

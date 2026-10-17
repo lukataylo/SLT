@@ -189,6 +189,12 @@ final class RelayClient: ObservableObject {
         components.path = "/ws"
         components.queryItems = [URLQueryItem(name: "name", value: name), URLQueryItem(name: "frame", value: "local")]
         guard let url = components.url else { return }
+        // A new connection is a new peer on the server: nothing carries over.
+        alignment = Alignment(aligned: false, method: nil, match: nil, ambiguous: false, needsFloor: true)
+        roomId = nil
+        feeds = [:]
+        peerMarks = [:]
+        feedsVersion += 1
         let task = URLSession.shared.webSocketTask(with: url)
         task.maximumMessageSize = 16 * 1024 * 1024
         self.task = task
