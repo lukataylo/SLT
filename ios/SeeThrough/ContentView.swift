@@ -8,6 +8,7 @@ struct ContentView: View {
     @AppStorage("server") private var server = "https://web-production-94bf8.up.railway.app"
     @AppStorage("name") private var name = UIDevice.current.name
     @State private var showSettings = false
+    @State private var mapExpanded = false
 
     var body: some View {
         ZStack {
@@ -15,9 +16,12 @@ struct ContentView: View {
             LinearGradient(colors: [.black.opacity(0.75), .clear, .clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-            VStack(spacing: 0) {
+            VStack(spacing: 12) {
                 header
                 Spacer()
+                floorPlan
+                    .frame(height: mapExpanded ? 420 : 200)
+                    .onTapGesture { withAnimation(.snappy) { mapExpanded.toggle() } }
                 statusCard
             }
             .padding(16)
@@ -38,7 +42,7 @@ struct ContentView: View {
             }
             Spacer()
             counter(relay.peers, "PEERS")
-            counter(relay.mapWalls, "MAP WALLS").padding(.leading, 18)
+            counter(relay.mapWalls.count, "MAP WALLS").padding(.leading, 18)
             Spacer()
             Button { showSettings = true } label: {
                 Text("SETUP").mono(11, weight: .bold).padding(.horizontal, 14).padding(.vertical, 9)
@@ -53,6 +57,21 @@ struct ContentView: View {
         VStack(spacing: 2) {
             Text(String(format: "%02d", value)).font(.system(size: 24, weight: .heavy, design: .monospaced))
             Text(label).mono(9).foregroundStyle(.gray)
+        }
+    }
+
+    /// Once aligned, the shared map from the server (everyone's LiDAR walls)
+    /// with this phone placed on it; before that, this phone's own scan.
+    @ViewBuilder private var floorPlan: some View {
+        if relay.alignment.aligned {
+            FloorPlanView(
+                walls: relay.mapWalls,
+                me: capture.localMark.map { relay.alignment.transform.apply($0) },
+                peers: Array(relay.peerMarks.values),
+                title: "SHARED MAP · LIVE"
+            )
+        } else {
+            FloorPlanView(walls: capture.localWalls, me: capture.localMark, peers: [], title: "LOCAL SCAN · NOT ALIGNED")
         }
     }
 

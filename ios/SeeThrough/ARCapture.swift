@@ -9,6 +9,10 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     @Published private(set) var wallCount = 0
     @Published private(set) var floorFound = false
     @Published private(set) var hasLiDAR = false
+    /// This phone's walls and position in its own ARKit frame, for the map
+    /// card before (or without) a server alignment.
+    @Published private(set) var localWalls: [[Float]] = []
+    @Published private(set) var localMark: Mark?
 
     let session = ARSession()
     var onPose: ((Pose) -> Void)?
@@ -52,12 +56,14 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
 
         if now - lastPose >= Self.poseInterval {
             lastPose = now
+            localMark = Mark(position: pose.position, orientation: pose.orientation)
             onPose?(pose)
         }
         if now - lastPlanes >= Self.planesInterval {
             lastPlanes = now
             let (walls, floorY) = WallExtractor.extract(from: frame.anchors)
             wallCount = walls.count
+            localWalls = walls
             floorFound = floorY != nil
             onPlanes?(walls, floorY)
         }

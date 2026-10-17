@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// WebSocket link to the relay. Connects with `frame=local`, so the server
 /// treats this phone's poses as ARKit-frame and aligns them using its walls.
@@ -9,11 +10,15 @@ final class RelayClient: ObservableObject {
         var method: String?
         var match: Double?
         var ambiguous: Bool
+        var transform = FloorTransform()
     }
 
     @Published private(set) var connected = false
     @Published private(set) var peers = 0
-    @Published private(set) var mapWalls = 0
+    /// The shared, vectorised floor plan in map coordinates.
+    @Published private(set) var mapWalls: [[Float]] = []
+    /// Other phones on the floor plan, by peer id.
+    @Published private(set) var peerMarks: [String: Mark] = [:]
     @Published private(set) var alignment = Alignment(aligned: false, method: nil, match: nil, ambiguous: false)
 
     private var task: URLSessionWebSocketTask?
@@ -81,6 +86,7 @@ final class RelayClient: ObservableObject {
                 case .failure:
                     self.connected = false
                     self.peers = 0
+                    self.peerMarks = [:]
                     try? await Task.sleep(for: .seconds(2))
                     if self.task === task { self.open() }
                 }
@@ -94,20 +100,44 @@ final class RelayClient: ObservableObject {
               let type = msg["t"] as? String else { return }
         switch type {
         case "welcome":
-            peers = (msg["peers"] as? [Any])?.count ?? 0
-            mapWalls = ((msg["map"] as? [String: Any])?["walls"] as? [Any])?.count ?? 0
+            let list = msg["peers"] as? [[String: Any]] ?? []
+            peers = list.count
+            peerMarks = [:]
+            for peer in list {
+                if let id = peer["id"] as? String, let pose = peer["pose"] as? [String: Any], let mark = Self.mark(pose) {
+                    peerMarks[id] = mark
+                }
+            }
+            mapWalls = Self.walls((msg["map"] as? [String: Any])?["walls"])
         case "join": peers += 1
-        case "leave": peers = max(0, peers - 1)
-        case "map": mapWalls = (msg["walls"] as? [Any])?.count ?? 0
+        case "leave":
+            peers = max(0, peers - 1)
+            if let id = msg["id"] as? String { peerMarks[id] = nil }
+        case "pose":
+            if let id = msg["id"] as? String, let mark = Self.mark(msg) { peerMarks[id] = mark }
+        case "map": mapWalls = Self.walls(msg["walls"])
         case "align":
+            let a = msg["alignment"] as? [String: Any]
+            let t = (a?["t"] as? [Double]) ?? [0, 0, 0]
             alignment = Alignment(
                 aligned: msg["aligned"] as? Bool ?? false,
                 method: msg["method"] as? String,
                 match: msg["inlierFraction"] as? Double,
-                ambiguous: msg["ambiguous"] as? Bool ?? false
+                ambiguous: msg["ambiguous"] as? Bool ?? false,
+                transform: FloorTransform(yaw: Float(a?["yaw"] as? Double ?? 0), tx: Float(t.first ?? 0), tz: Float(t.count > 2 ? t[2] : 0))
             )
         default: break
         }
+    }
+
+    private static func walls(_ any: Any?) -> [[Float]] {
+        (any as? [[Double]] ?? []).filter { $0.count == 4 }.map { $0.map(Float.init) }
+    }
+
+    private static func mark(_ pose: [String: Any]) -> Mark? {
+        guard let p = pose["p"] as? [Double], p.count == 3, let q = pose["q"] as? [Double], q.count == 4 else { return nil }
+        let orientation = simd_quatf(ix: Float(q[0]), iy: Float(q[1]), iz: Float(q[2]), r: Float(q[3]))
+        return Mark(position: SIMD3(Float(p[0]), Float(p[1]), Float(p[2])), orientation: orientation)
     }
 
     private func sendText(_ message: [String: Any]) {
