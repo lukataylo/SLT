@@ -15,6 +15,8 @@ export { depthColor };
 const WALL_HEIGHT = 2.6;
 const BOX_CYAN = 0x2fd6e6;
 const TILE_GREEN = 0xc8ff3a;
+// The scan stays see-through in every mode, so people show through it.
+const SPLAT_OPACITY = 0.55;
 const FRAME_GREEN = 0x7dd23a;
 const ORIGIN_RED = 0xd71921;
 const GROUND_Y = -0.55; // the scan sits on a "curtain" above the ground frame
@@ -189,11 +191,12 @@ export class AdminScene {
 
     // The scan is Gaussian splats in a scene of their own, so they can be kept
     // out of the bloom: only the wireframe, frames and beacons glow, and the
-    // splats keep their true camera colours. Both scenes share one depth
-    // buffer in the final pass, so walls and splats occlude each other.
+    // splats keep their true camera colours. The splats are always
+    // see-through and drawn first, with walls and people over them, so the
+    // operator can watch people walk through the space.
     this.splatScene = new THREE.Scene();
     this.splatScene.add(new SparkRenderer({ renderer: this.renderer }));
-    this.cloud = new SplatCloud({ mode: 'colour' });
+    this.cloud = new SplatCloud({ mode: 'colour', opacity: SPLAT_OPACITY });
     this.splatScene.add(this.cloud.group);
     this.mode = 'colour';
 
@@ -208,10 +211,10 @@ export class AdminScene {
     this.bloomComposer.addPass(this.bloom);
 
     this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    const splatPass = new RenderPass(this.splatScene, this.camera);
-    splatPass.clear = false;
-    this.composer.addPass(splatPass);
+    this.composer.addPass(new RenderPass(this.splatScene, this.camera));
+    const scenePass = new RenderPass(this.scene, this.camera);
+    scenePass.clear = false;
+    this.composer.addPass(scenePass);
     const mix = new ShaderPass(
       new THREE.ShaderMaterial({
         uniforms: { baseTexture: { value: null }, bloomTexture: { value: this.bloomComposer.renderTarget2.texture } },
@@ -494,7 +497,8 @@ export class AdminScene {
   applyMode() {
     const colour = this.mode === 'colour' && this.cloud.count > 0;
     for (const m of this.wallMats) m.uniforms.uAlpha.value = colour ? 0.15 : 1;
-    for (const e of this.wallEdges) e.material.opacity = colour ? 0.3 : 1;
+    // Semi-transparent either way: walls never hide the people behind them.
+    for (const e of this.wallEdges) e.material.opacity = colour ? 0.3 : 0.6;
   }
 
   // Architectural plan laid on the floor. Plan frame: x right, z down the
@@ -618,6 +622,11 @@ export class AdminScene {
     );
     photo.visible = false;
     const lab = label(d.name.toUpperCase(), 'device');
+    // People are always drawn on top: never hidden by walls or the scan.
+    for (const o of [photo, tile, beam, spot, cone]) {
+      o.material.depthTest = false;
+      o.renderOrder = 10;
+    }
     group.add(photo, tile, beam, spot, cone, lab);
     return { group, tile, photo, photoTex, beam, spot, cone, label: lab, el: lab.element, target: new THREE.Vector3(), yaw: 0, dim: 1, placed: false };
   }

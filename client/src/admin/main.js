@@ -167,50 +167,63 @@ $('devices').addEventListener('keydown', (e) => {
   const row = e.target.closest('.device-row');
   if (row && (e.key === 'Enter' || e.key === ' ')) scene.focusOn(row.dataset.id);
 });
-// Splat colours are remembered separately for the full 3D view (default
-// DEPTH) and the operator's 3D panel (default TRUE COLOUR); the one scene
-// takes whichever applies to where it's showing.
+// Splat colours are remembered separately for the full 3D view and the
+// operator's 3D panel (both DEPTH unless the operator picks otherwise); the
+// one scene takes whichever applies to where it's showing. Only a tap is
+// remembered, so the defaults reach anyone who hasn't chosen.
 let fullMode = 'depth';
-let panelMode = 'colour';
+let panelMode = 'depth';
+const remember = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+};
+const recall = (key) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
 function applySceneMode() {
   const mode = view === '3d' ? fullMode : panelMode;
   scene.setMode(mode);
   document.body.dataset.mode = mode;
 }
 function setMode(mode) {
-  fullMode = mode;
-  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
-  try {
-    localStorage.setItem('slt.admin.mode', mode);
-  } catch {}
+  fullMode = mode === 'colour' ? 'colour' : 'depth';
+  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === fullMode));
   applySceneMode();
 }
 function setPanelMode(mode) {
-  panelMode = mode === 'depth' ? 'depth' : 'colour';
+  panelMode = mode === 'colour' ? 'colour' : 'depth';
   operator.setPanelColour(panelMode);
-  try {
-    localStorage.setItem('slt.admin.panelMode', panelMode);
-  } catch {}
   applySceneMode();
 }
-for (const b of document.querySelectorAll('button[data-pmode]')) b.addEventListener('click', () => setPanelMode(b.dataset.pmode));
-for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
-$('cutaway').addEventListener('click', () => {
-  const on = $('cutaway').getAttribute('aria-pressed') !== 'true';
+function setCutaway(on) {
   $('cutaway').setAttribute('aria-pressed', String(on));
   scene.setCutaway(on);
-});
-// Height-coloured splats are the default look; true colour is one tap away.
-let savedMode = 'depth';
-try {
-  savedMode = localStorage.getItem('slt.admin.mode') ?? 'depth';
-} catch {}
-setMode(savedMode === 'colour' ? 'colour' : 'depth');
-try {
-  setPanelMode(localStorage.getItem('slt.admin.panelMode') ?? 'colour');
-} catch {
-  setPanelMode('colour');
 }
+for (const b of document.querySelectorAll('button[data-pmode]'))
+  b.addEventListener('click', () => {
+    setPanelMode(b.dataset.pmode);
+    remember('slt.admin.panelColours', panelMode);
+  });
+for (const b of document.querySelectorAll('[data-mode]'))
+  b.addEventListener('click', () => {
+    setMode(b.dataset.mode);
+    remember('slt.admin.colours', fullMode);
+  });
+$('cutaway').addEventListener('click', () => {
+  const on = $('cutaway').getAttribute('aria-pressed') !== 'true';
+  setCutaway(on);
+  remember('slt.admin.cutaway', on ? 'on' : 'off');
+});
+// DEPTH colours with the CUTAWAY on are the standard look in both 3D views;
+// true colour and the full height are one tap away.
+setMode(recall('slt.admin.colours') ?? 'depth');
+setPanelMode(recall('slt.admin.panelColours') ?? 'depth');
+setCutaway(recall('slt.admin.cutaway') !== 'off');
 
 // OPERATOR (floor plan + every camera) or the 3D bird's-eye view. The 3D
 // scene only renders while it's showing: splats are expensive.

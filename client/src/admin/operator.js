@@ -77,8 +77,8 @@ export class OperatorView {
             <button data-plan="3d" aria-pressed="false">3D SPLAT</button>
           </div>
           <div class="op-seg op-pmodes" role="group" aria-label="Splat colours">
-            <button data-pmode="colour" aria-pressed="true">TRUE COLOUR</button>
-            <button data-pmode="depth" aria-pressed="false">DEPTH</button>
+            <button data-pmode="colour" aria-pressed="false">TRUE COLOUR</button>
+            <button data-pmode="depth" aria-pressed="true">DEPTH</button>
           </div>
         </div>
         <div class="op-canvas"><canvas aria-label="Top-down floor plan with every device and its view direction" role="img"></canvas>
