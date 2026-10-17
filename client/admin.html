@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
-    <title>SLT Admin</title>
+    <title>Hive Vision · Operator</title>
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,7 +21,7 @@
     <header id="top">
       <div class="brand">
         <span class="dot red"></span>
-        <h1>SLT<span>ADMIN</span></h1>
+        <h1>HIVE VISION<span>OPERATOR</span></h1>
       </div>
       <div class="views" role="group" aria-label="View">
         <button data-view="operator" aria-pressed="true">OPERATOR</button>
@@ -38,7 +38,36 @@
         <button id="cutaway" aria-pressed="false" title="Hide everything above 1.4 m to look into the rooms">CUTAWAY</button>
       </div>
       <div class="live"><span id="conn" class="dot"></span><span id="connLabel">OFFLINE</span></div>
+      <button id="agentButton" class="agent-avatar" type="button" aria-label="Coordinator agent" aria-expanded="false" aria-controls="agentPanel">
+        <span class="agent-ring"><span class="agent-glyph"></span><span class="agent-unread" aria-hidden="true"></span></span>
+        <span class="agent-label">AGENT</span>
+      </button>
     </header>
+
+    <div id="agentPanel" class="agent-panel" role="dialog" aria-modal="true" aria-labelledby="agentTitle" hidden>
+      <div class="agent-backdrop"></div>
+      <section class="agent-sheet">
+        <header class="agent-head">
+          <span class="agent-title-glyph"></span>
+          <h2 id="agentTitle">COORDINATOR AGENT</h2>
+          <button class="agent-close" type="button" aria-label="Close the agent">CLOSE</button>
+        </header>
+        <ol class="agent-feed" aria-label="Agent events and replies"></ol>
+        <div class="agent-actions">
+          <button class="agent-report" type="button">SITUATION REPORT</button>
+          <div class="agent-chips">
+            <button type="button" data-q="Who needs attention?">Who needs attention?</button>
+            <button type="button" data-q="Where is everyone?">Where is everyone?</button>
+            <button type="button" data-q="Coverage gaps?">Coverage gaps?</button>
+          </div>
+          <form class="agent-ask">
+            <label class="sr-only" for="agentInput">Ask the agent</label>
+            <input id="agentInput" type="text" autocomplete="off" placeholder="Ask the agent…" maxlength="500" />
+            <button type="submit">SEND</button>
+          </form>
+        </div>
+      </section>
+    </div>
 
     <aside id="side">
       <nav class="tabs">

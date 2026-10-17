@@ -20,7 +20,7 @@ targets:
     info:
       path: SeeThrough/Info.plist
       properties:
-        CFBundleDisplayName: See Through
+        CFBundleDisplayName: Hive Vision
         NSCameraUsageDescription: The camera streams what you see and scans walls with LiDAR so other people can see through them.
         UIRequiredDeviceCapabilities: [arkit]
         UIAppFonts: [Doto.ttf, SpaceMono-Regular.ttf, SpaceMono-Bold.ttf]

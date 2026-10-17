@@ -77,6 +77,18 @@ final class RelayClient: ObservableObject {
     @Published private(set) var rooms: [MapRoom] = []
     @Published private(set) var roomId: String?
     @Published private(set) var plan: PlanInfo?
+    /// The firefighter agent's feed: events from the server and Q&A.
+    struct AgentMessage: Identifiable, Equatable {
+        enum Kind: Equatable { case event(warn: Bool), question, answer(source: String) }
+        let id = UUID()
+        var at: Date
+        var kind: Kind
+        var text: String
+    }
+    @Published private(set) var agentFeed: [AgentMessage] = []
+    @Published var agentUnread = 0
+    @Published private(set) var agentBusy = false
+
     /// Door-sized gaps in the map's walls: open (or closed) doors.
     @Published private(set) var doorways: [Doorway] = []
     /// Who founded the map's fixed origin, once there is one.
@@ -214,6 +226,33 @@ final class RelayClient: ObservableObject {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
             throw PlanUploadError(message: status == 401 ? "This server needs an admin token. Add it in Settings → Advanced." : message ?? "Upload failed (\(status)).")
         }
+    }
+
+    /// Asks the firefighter agent (briefing when `question` is empty). The
+    /// server answers from the live situation, with Claude when configured.
+    func askAgent(_ question: String) async {
+        guard !agentBusy, let server, let url = URL(string: "/api/agent", relativeTo: server) else { return }
+        agentBusy = true
+        defer { agentBusy = false }
+        if !question.isEmpty { appendAgent(.init(at: Date(), kind: .question, text: question)) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["role": "firefighter", "peerId": selfId ?? "", "question": question])
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            appendAgent(.init(at: Date(), kind: .answer(source: reply?["source"] as? String ?? "rules"),
+                              text: reply?["text"] as? String ?? "No answer."))
+        } catch {
+            appendAgent(.init(at: Date(), kind: .answer(source: "error"), text: "Couldn't reach the agent: \(error.localizedDescription)"))
+        }
+    }
+
+    private func appendAgent(_ m: AgentMessage) {
+        agentFeed.append(m)
+        if agentFeed.count > 100 { agentFeed.removeFirst(agentFeed.count - 100) }
     }
 
     /// Lays the uploaded plan onto the map (plan frame → map frame).
@@ -369,6 +408,12 @@ final class RelayClient: ObservableObject {
                 peerMarks[id] = nil
                 feeds[id] = nil
                 feedsVersion += 1
+            }
+        case "agent":
+            if msg["kind"] as? String == "event", let text = msg["text"] as? String {
+                let at = (msg["at"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
+                appendAgent(.init(at: at, kind: .event(warn: msg["level"] as? String == "warn"), text: text))
+                agentUnread += 1
             }
         case "pairing":
             switch msg["action"] as? String {

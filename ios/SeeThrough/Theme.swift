@@ -39,7 +39,7 @@ extension Text {
 
 /// 9×9 dot-matrix icons. `#` is a lit dot, `.` an unlit one.
 enum DotGlyph: String, CaseIterable {
-    case eye, cube, qr, gear, camera, mesh, planes, palette, ghost, haptic, plus, close, check, reset, scan, people, server, back
+    case eye, cube, qr, gear, camera, mesh, planes, palette, ghost, haptic, plus, close, check, reset, scan, people, server, back, helmet
 
     var rows: [String] {
         switch self {
@@ -60,6 +60,7 @@ enum DotGlyph: String, CaseIterable {
         case .scan: return ["##.....##", "#.......#", ".........", "...###...", "...###...", "...###...", ".........", "#.......#", "##.....##"]
         case .people: return ["..#...#..", ".###.###.", "..#...#..", ".........", ".###.###.", "#####.###", "#####.###", ".........", "........."]
         case .server: return ["#########", "#.#.....#", "#########", ".........", "#########", "#.#.....#", "#########", "....#....", "..#####.."]
+        case .helmet: return ["...###...", "..#####..", ".##.#.##.", ".#######.", "#########", "#########", ".#.....#.", ".#######.", "........."]
         case .back: return [".........", "...#.....", "..#......", ".#.......", "#########", ".#.......", "..#......", "...#.....", "........."]
         }
     }

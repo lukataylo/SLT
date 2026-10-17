@@ -46,7 +46,7 @@ final class Settings: ObservableObject {
 @MainActor
 final class AppModel: ObservableObject {
     enum Mode: Equatable { case start, creating, group, live, scan, pairScan, floorplan }
-    enum Sheet: String, Identifiable { case rooms, showCode, settings, plan; var id: String { rawValue } }
+    enum Sheet: String, Identifiable { case rooms, showCode, settings, plan, agent; var id: String { rawValue } }
 
     /// The room the user chose to scan: an existing one, or a new one.
     struct RoomIntent: Equatable {

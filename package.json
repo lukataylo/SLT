@@ -16,6 +16,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@sparkjsdev/spark": "^2.3.1",
     "three": "^0.186.1",
     "ws": "^8.22.0"

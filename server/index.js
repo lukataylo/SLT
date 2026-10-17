@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { decodeClouds, encodeClouds } from '../shared/cloud.js';
 import { LiveMap } from './livemap.js';
+import { ask } from './agent.js';
 import { planApi } from './plans.js';
 import { Recorder } from './recorder.js';
 import { Room } from './room.js';
@@ -135,6 +136,21 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     return void res.end(JSON.stringify({ peers: room.peers.size, admins: room.admins.size, rooms: room.map.rooms.length, walls: room.map.walls.length, ...room.stats }));
   }
+  // The agents: { role: 'firefighter' | 'coordinator', peerId?, question? }.
+  if (req.method === 'POST' && req.url === '/api/agent') {
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > 10000) return void res.writeHead(413).end();
+    }
+    let params = {};
+    try {
+      params = JSON.parse(body || '{}');
+    } catch {}
+    const reply = await ask(room, params);
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
+    return void res.end(JSON.stringify(reply));
+  }
   // The splat cloud is what web viewers render, so it's as public as the app.
   if (req.url.startsWith('/api/cloud')) {
     const body = encodeClouds(room.map.cloudRooms());
@@ -175,6 +191,7 @@ wss.on('connection', (ws, req) => {
 setInterval(() => room.broadcastDevices(), 200).unref();
 // Phones' member lists: online / live state changes with time, not messages.
 setInterval(() => room.broadcastPeers(), 2000).unref();
+setInterval(() => room.checkStillness(), 5000).unref();
 
 // Tunnels and mobile networks silently drop idle sockets; ping to detect them.
 setInterval(() => {

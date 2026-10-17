@@ -639,3 +639,41 @@ test('ceilings are left out of the splat cloud, walls keep their full height', (
   map2.loadClouds([{ id: 'r1', points: [5, 2.8, 5, 6, 1, 6], colors: [9, 9, 9, 8, 8, 8], normals: [0, -127, 0, 127, 0, 0] }]);
   assert.deepEqual(map2.cloudRooms()[0].points, [6, 1, 6]);
 });
+
+// --- Agents -------------------------------------------------------------------
+
+test('agents: events are logged and the rule briefing places teammates by clock direction', async () => {
+  const { situation, ruleBrief, ask } = await import('../server/agent.js');
+  let now = 1000;
+  const room = new Room({ now: () => now });
+  const admin = new FakeSocket();
+  room.join(admin, { role: 'admin' });
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'Luka', frame: 'local' });
+  room.handleText(idA, CREATE);
+  room.handleText(idA, planes([[0, -2, 0, 2]], 0)); // a wall along x = 0
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'Tom', frame: 'local' });
+  room.handleText(idB, planes([[0, -2, 0, 2]], 0));
+  room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 0, t: [0, 0, 0] } })); // placed via Luka
+  // Luka at (1, 0) facing -z; Tom at (-3, 0): to Luka's left, through the wall.
+  room.handleText(idA, JSON.stringify({ t: 'pose', p: [1, 1.4, 0], q: [0, 0, 0, 1] }));
+  room.handleText(idB, JSON.stringify({ t: 'pose', p: [-3, 1.4, 0], q: [0, 0, 0, 1] }));
+  assert.ok(admin.json.some((m) => m.t === 'agent' && m.text === 'Tom placed on the map'));
+
+  const s = situation(room, idA);
+  assert.deepEqual(s.team[0].fromYou, { distanceM: 4, clock: 9, behindWall: true });
+  assert.match(ruleBrief('firefighter', s), /Tom: 4 m at 9 o'clock, behind a wall/);
+
+  const coord = await ask(room, { role: 'coordinator' }); // no API key in tests: rule-based
+  assert.equal(coord.source, 'rules');
+  assert.match(coord.text, /2 of 2 responders online/);
+
+  // A minute and a half of silence: stillness is flagged, and both read as offline.
+  now += 95000;
+  room.checkStillness();
+  assert.ok(room.events.some((e) => e.text === "Luka hasn't moved for 90 s"));
+  const later = await ask(room, { role: 'coordinator' });
+  assert.match(later.text, /0 of 2 responders online/);
+  assert.match(later.text, /Check on: Luka, Tom|Check on: Tom, Luka/);
+});

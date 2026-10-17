@@ -1,5 +1,6 @@
 import { decodeFrame } from '../../../shared/protocol.js';
 import { fetchCloudSnapshot } from '../splatcloud.js';
+import { AgentPanel, startMockEvents } from './agent.js';
 import { startMock } from './mock.js';
 import { OperatorView } from './operator.js';
 import { AdminScene } from './scene.js';
@@ -10,6 +11,7 @@ import { AdminScene } from './scene.js';
 //   {t:'devices', devices}                            ~5 Hz
 //   {t:'cloud', roomId, points, colors, normals}      append splats (xyz m, rgb 0-255, normal x127)
 //   {t:'cloud-reset', roomId}                         null = all rooms
+//   {t:'agent', kind:'event', at, text, level}        coordinator agent feed
 //   binary video frames (shared/protocol.js)          ~4 fps per device
 
 const $ = (id) => document.getElementById(id);
@@ -23,6 +25,7 @@ let planMode = '2d';
 const sceneShowing = () => view === '3d' || planMode === '3d';
 
 const state = { map: null, devices: [], connected: false };
+const agent = new AgentPanel({ button: $('agentButton'), panel: $('agentPanel'), mock: params.has('mock') });
 const pad = (n, w = 2) => String(n).padStart(w, '0');
 
 function handle(msg) {
@@ -56,6 +59,9 @@ function handle(msg) {
     case 'cloud-reset':
       scene.resetCloud(msg.roomId ?? null);
       break;
+    case 'agent':
+      agent.onEvent(msg);
+      return;
     default:
       break;
   }
@@ -277,6 +283,7 @@ function setConnected(on, label) {
 if (params.has('mock')) {
   setConnected(true, 'MOCK');
   startMock(handle, handleFrame);
+  startMockEvents(handle);
 } else {
   let retry = 1000;
   const connect = () => {

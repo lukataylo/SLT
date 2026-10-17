@@ -10,6 +10,7 @@
 		0B6C268BB67A8BB6DF38921F /* GroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD3A38082F02C9528169FAE4 /* GroupView.swift */; };
 		10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */; };
 		167587079891CD89B60C3786 /* LiveFloorPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A256EEF19DB2DB0AECA42C /* LiveFloorPlanView.swift */; };
+		2C531BABEB961BF96CE66E67 /* AgentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649B8EF87764F75D9C8D7C33 /* AgentViews.swift */; };
 		2F145AF5A822E5F575D080D0 /* QRPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */; };
 		382C00E4A7B6DFF15C1E0354 /* WallExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0543F7970E1CB561A1539DE /* WallExtractor.swift */; };
 		41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */; };
@@ -49,6 +50,7 @@
 		31B4FB982C6D351EBDA7F6CD /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4EECFBA8047209B78CC3F6D5 /* PlanViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanViews.swift; sourceTree = "<group>"; };
 		5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan3D.swift; sourceTree = "<group>"; };
+		649B8EF87764F75D9C8D7C33 /* AgentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentViews.swift; sourceTree = "<group>"; };
 		64ABFA156B26B5BAF3250110 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPickerView.swift; sourceTree = "<group>"; };
 		6A2E28742F115954DAB5CA76 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 		1BA3EC283FD0859D87B3FC44 /* SeeThrough */ = {
 			isa = PBXGroup;
 			children = (
+				649B8EF87764F75D9C8D7C33 /* AgentViews.swift */,
 				64ABFA156B26B5BAF3250110 /* AppModel.swift */,
 				1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */,
 				E5444AC4E972792FA3263D8D /* ARPreview.swift */,
@@ -214,6 +217,7 @@
 			files = (
 				C397696CCEBE494804B935EB /* ARCapture.swift in Sources */,
 				EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */,
+				2C531BABEB961BF96CE66E67 /* AgentViews.swift in Sources */,
 				8606D325C4A794F4504C1CB1 /* AppModel.swift in Sources */,
 				BCA8E202FD0AF19F198AC96C /* Figures.swift in Sources */,
 				10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */,

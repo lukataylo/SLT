@@ -41,6 +41,8 @@ export class Room {
     // Called with the map before a new group wipes it, so nothing is lost.
     this.archive = archive;
     this.lastPeersSignature = '';
+    // What happened, for the agents and their feeds (newest last).
+    this.events = [];
     this.peers = new Map();
     this.admins = new Map();
     // QR pairing codes on display: code -> { peerId, name, m, at }.
@@ -70,6 +72,7 @@ export class Room {
     }
     this.peers.set(id, peer);
     this.broadcastJson({ t: 'join', id, name: peer.name }, id);
+    if (peer.local) this.logEvent(`${peer.name} connected`);
     this.broadcastPeers();
     return id;
   }
@@ -81,6 +84,7 @@ export class Room {
     for (const [code, shown] of this.pairingCodes) if (shown.peerId === id) this.pairingCodes.delete(code);
     this.peers.delete(id);
     this.broadcastJson({ t: 'leave', id }, id);
+    if (peer.local) this.logEvent(`${peer.name} disconnected`, 'warn');
     this.broadcastPeers();
     if (peer.alignment) {
       this.map.commit(id);
@@ -108,6 +112,7 @@ export class Room {
     if (msg?.t === 'pose' && isValidPose(msg)) {
       const pose = this.toMapPose(peer, pickPose(msg));
       if (!pose) return;
+      this.trackMovement(peer, pose);
       peer.pose = pose;
       this.broadcastJson({ t: 'pose', id, ...pose }, id);
     } else if (msg?.t === 'planes' && peer.local && Array.isArray(msg.walls)) {
@@ -465,6 +470,14 @@ export class Room {
 
   sendAlign(peer, result) {
     this.broadcastPeers();
+    if (peer.local && !!peer.alignment !== !!peer.wasPlaced) {
+      peer.wasPlaced = !!peer.alignment;
+      this.logEvent(peer.alignment ? `${peer.name} placed on the map` : `${peer.name} lost their place`, peer.alignment ? 'info' : 'warn');
+    }
+    if (peer.roomId && peer.roomId !== peer.lastRoomId) {
+      if (peer.lastRoomId) this.logEvent(`${peer.name} moved to ${this.map.room(peer.roomId)?.name ?? 'another room'}`);
+      peer.lastRoomId = peer.roomId;
+    }
     this.sendJson(peer, {
       t: 'align',
       aligned: !!peer.alignment,
@@ -493,6 +506,38 @@ export class Room {
     const msg = { t: 'cloud-reset', roomId };
     this.broadcastAdmins(msg);
     for (const p of this.peers.values()) if (!p.local) this.sendJson(p, msg);
+  }
+
+  // --- Agent events ---------------------------------------------------------
+
+  logEvent(text, level = 'info') {
+    const event = { at: this.now(), text, level };
+    this.events.push(event);
+    if (this.events.length > 200) this.events.shift();
+    const msg = { t: 'agent', kind: 'event', ...event };
+    this.broadcastAdmins(msg);
+    for (const p of this.peers.values()) if (p.local) this.sendJson(p, msg);
+  }
+
+  trackMovement(peer, pose) {
+    const last = peer.movedFrom;
+    if (!last || Math.hypot(pose.p[0] - last[0], pose.p[2] - last[2]) > 0.4) {
+      peer.movedFrom = pose.p;
+      peer.lastMovedAt = this.now();
+      peer.stillAlerted = false;
+    }
+  }
+
+  /** Called periodically: flags moving responders who've stopped for 90 s. */
+  checkStillness() {
+    const now = this.now();
+    for (const p of this.peers.values()) {
+      if (!p.local || p.role === 'still' || !p.alignment || !p.lastMovedAt || p.stillAlerted) continue;
+      if (now - p.lastMovedAt > 90000) {
+        p.stillAlerted = true;
+        this.logEvent(`${p.name} hasn't moved for 90 s`, 'warn');
+      }
+    }
   }
 
   broadcastAdmins(msg) {

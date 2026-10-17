@@ -22,7 +22,7 @@ struct StartView: View {
                 }
                 Spacer()
                 // Smaller while typing, and never truncated: the keyboard takes half the screen.
-                Text("SEE\nTHROUGH").font(Theme.display(nameFocused ? 34 : 58)).lineSpacing(-6)
+                Text("HIVE\nVISION").font(Theme.display(nameFocused ? 34 : 58)).lineSpacing(-6)
                     .fixedSize(horizontal: false, vertical: true)
                     .animation(.snappy, value: nameFocused)
                 Text("What's your name?").label(10).foregroundStyle(Theme.muted)

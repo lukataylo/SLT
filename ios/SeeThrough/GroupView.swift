@@ -21,6 +21,7 @@ struct GroupView: View {
                 HStack {
                     Button { model.leaveGroup() } label: { Text("Leave").label(10, bold: true).foregroundStyle(Theme.muted) }
                     Spacer()
+                    AgentAvatar(relay: relay) { model.sheet = .agent }
                     IconButton(glyph: .gear, label: "Settings") { model.sheet = .settings }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {

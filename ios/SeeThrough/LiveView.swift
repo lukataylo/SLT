@@ -209,7 +209,7 @@ struct LiveView: View {
             .padding(.horizontal, 16).padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 16).fill(Theme.panel))
             Spacer()
-            Color.clear.frame(width: 46, height: 46)
+            AgentAvatar(relay: relay) { model.sheet = .agent }
         }
     }
 
@@ -335,7 +335,7 @@ struct LiveView: View {
                         Text("Live · still").label(10, bold: true)
                     }
                     Spacer()
-                    Color.clear.frame(width: 46, height: 46)
+                    AgentAvatar(relay: relay) { model.sheet = .agent }
                 }
                 Text("Streaming to the group. Keep this phone where it is, pointing into the room.")
                     .font(.system(size: 14)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)

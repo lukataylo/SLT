@@ -59,6 +59,7 @@ private struct RootContent: View {
             case .rooms: RoomPickerView(model: model, relay: relay)
             case .showCode: ShowCodeView(model: model, relay: relay, capture: capture)
             case .settings: SettingsView(model: model, relay: relay, settings: settings)
+            case .agent: AgentSheet(relay: relay)
             case .plan: PlanSheet(model: model, relay: relay, capture: capture, settings: settings, upload: model.planUpload)
             }
         }
