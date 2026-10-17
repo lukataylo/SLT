@@ -90,7 +90,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					F27678CB92926EB36AA5D9D1 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 5QC5886P5V;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -202,14 +202,14 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 5QC5886P5V;
 				INFOPLIST_FILE = SeeThrough/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.slt.seethrough;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukadadiani.seethrough;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -279,14 +279,14 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 5QC5886P5V;
 				INFOPLIST_FILE = SeeThrough/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.slt.seethrough;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lukadadiani.seethrough;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
