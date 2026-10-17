@@ -8,37 +8,63 @@
 
 /* Begin PBXBuildFile section */
 		10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */; };
+		20FE62D866402513DF99A56C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E32B0A6B61D19B349B19BCEF /* HomeView.swift */; };
+		2F145AF5A822E5F575D080D0 /* QRPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */; };
 		382C00E4A7B6DFF15C1E0354 /* WallExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0543F7970E1CB561A1539DE /* WallExtractor.swift */; };
-		3AD3D627AAA468D8D97F903A /* PairingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F529973FD35FA3C2CD63B280 /* PairingSheet.swift */; };
 		41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */; };
 		4BB7C8C778731DCFDF587004 /* FloorPlan3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */; };
+		51A0BD1E92255A556F390004 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2E28742F115954DAB5CA76 /* RootView.swift */; };
+		61146A0EBC6C052826B146E9 /* OFL-SpaceMono.txt in Resources */ = {isa = PBXBuildFile; fileRef = 0AFB1E234697F412A47BFB90 /* OFL-SpaceMono.txt */; };
 		6D4E645D65D0D68F786F1EE9 /* LocalCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79E86AEC2483C2AC12E7FB5 /* LocalCloud.swift */; };
 		71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */; };
-		810A5878BE87E2DA89045638 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37688A5E6599A96D2AC7850F /* ContentView.swift */; };
+		7A75CB35A19390B5C2CCADA8 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B4FB982C6D351EBDA7F6CD /* Theme.swift */; };
+		7B2330B322F5107D3EE7A645 /* Indicators.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDC5B07407F5C70118A3EA0 /* Indicators.swift */; };
+		7DF1F189D71D36C3E6AEB8F9 /* SeeThroughView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5F5FA1CA41E2704C81F403 /* SeeThroughView.swift */; };
+		7F0A1BB921D1D6909D656FEA /* RoomPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */; };
 		83D7725535250E63C3843F38 /* MeshProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */; };
+		854FF87A1454391898E567CE /* Doto.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C6FE7FDE8BE1A4EF2157E98B /* Doto.ttf */; };
+		8591589FB84591BBD6B686BD /* OFL-Doto.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8EC197D22D32C3E27832FE85 /* OFL-Doto.txt */; };
+		8606D325C4A794F4504C1CB1 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64ABFA156B26B5BAF3250110 /* AppModel.swift */; };
+		8AB2A2BA1E952E60C1185DCB /* SpaceMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E5E3FCBAD1D893CD86A85A1D /* SpaceMono-Regular.ttf */; };
 		911A7DE7CABFF639B2F68AD8 /* RelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 252D0BD0194B2B707AEDFE64 /* RelayClient.swift */; };
-		95D14F9EFFFDCB1700312A6C /* RoomSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D009735BA12F6535F34463 /* RoomSheet.swift */; };
+		96EB3AEE8A8C4895B0F99EB2 /* SpaceMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 9F066E7F967E4A7340DA5A76 /* SpaceMono-Bold.ttf */; };
+		9746667391F574EB2FE8B1B3 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725CB393B4547C985E66C988 /* ScanView.swift */; };
+		A7912FB49AE9467883B53919 /* PairingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68DE356BAC41681776D02 /* PairingViews.swift */; };
 		BC25F29C178A4A58AC36CC40 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC603A3EBE175DDBDDB44C4 /* Wire.swift */; };
 		C397696CCEBE494804B935EB /* ARCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */; };
+		C8977C71469C90407061C9E6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22302FAB97C31B2324DB452B /* SettingsView.swift */; };
 		EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5444AC4E972792FA3263D8D /* ARPreview.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0AFB1E234697F412A47BFB90 /* OFL-SpaceMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-SpaceMono.txt"; sourceTree = "<group>"; };
 		1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARCapture.swift; sourceTree = "<group>"; };
 		1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeeThroughApp.swift; sourceTree = "<group>"; };
+		22302FAB97C31B2324DB452B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		252D0BD0194B2B707AEDFE64 /* RelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayClient.swift; sourceTree = "<group>"; };
-		37688A5E6599A96D2AC7850F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		31B4FB982C6D351EBDA7F6CD /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		3CDC5B07407F5C70118A3EA0 /* Indicators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Indicators.swift; sourceTree = "<group>"; };
 		5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan3D.swift; sourceTree = "<group>"; };
+		64ABFA156B26B5BAF3250110 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPickerView.swift; sourceTree = "<group>"; };
+		6A2E28742F115954DAB5CA76 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		725CB393B4547C985E66C988 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRPairing.swift; sourceTree = "<group>"; };
+		8EC197D22D32C3E27832FE85 /* OFL-Doto.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-Doto.txt"; sourceTree = "<group>"; };
+		9F066E7F967E4A7340DA5A76 /* SpaceMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SpaceMono-Bold.ttf"; sourceTree = "<group>"; };
 		A7071494A513CF1EE48CCF9D /* SeeThrough.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SeeThrough.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A8D009735BA12F6535F34463 /* RoomSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomSheet.swift; sourceTree = "<group>"; };
 		AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorPlan.swift; sourceTree = "<group>"; };
 		B0373ABAEAE8646612892A3B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		BA5F5FA1CA41E2704C81F403 /* SeeThroughView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeeThroughView.swift; sourceTree = "<group>"; };
+		BBB68DE356BAC41681776D02 /* PairingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViews.swift; sourceTree = "<group>"; };
 		BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorGeometry.swift; sourceTree = "<group>"; };
+		C6FE7FDE8BE1A4EF2157E98B /* Doto.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Doto.ttf; sourceTree = "<group>"; };
 		C79E86AEC2483C2AC12E7FB5 /* LocalCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCloud.swift; sourceTree = "<group>"; };
 		D0543F7970E1CB561A1539DE /* WallExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallExtractor.swift; sourceTree = "<group>"; };
+		E32B0A6B61D19B349B19BCEF /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		E5444AC4E972792FA3263D8D /* ARPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARPreview.swift; sourceTree = "<group>"; };
+		E5E3FCBAD1D893CD86A85A1D /* SpaceMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SpaceMono-Regular.ttf"; sourceTree = "<group>"; };
 		E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshProcessor.swift; sourceTree = "<group>"; };
-		F529973FD35FA3C2CD63B280 /* PairingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSheet.swift; sourceTree = "<group>"; };
 		FFC603A3EBE175DDBDDB44C4 /* Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wire.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -46,21 +72,30 @@
 		1BA3EC283FD0859D87B3FC44 /* SeeThrough */ = {
 			isa = PBXGroup;
 			children = (
+				64ABFA156B26B5BAF3250110 /* AppModel.swift */,
 				1C9D715DD1EC49E86E1BF997 /* ARCapture.swift */,
 				E5444AC4E972792FA3263D8D /* ARPreview.swift */,
-				37688A5E6599A96D2AC7850F /* ContentView.swift */,
 				BE540570DAEED10FADEB3CDF /* FloorGeometry.swift */,
 				AF7DC03CE9ABAD202DEEE5AA /* FloorPlan.swift */,
 				5C029589AA12A92C7794DF95 /* FloorPlan3D.swift */,
+				E32B0A6B61D19B349B19BCEF /* HomeView.swift */,
+				3CDC5B07407F5C70118A3EA0 /* Indicators.swift */,
 				B0373ABAEAE8646612892A3B /* Info.plist */,
 				C79E86AEC2483C2AC12E7FB5 /* LocalCloud.swift */,
 				E9CFF3FE67354BE4BE387214 /* MeshProcessor.swift */,
-				F529973FD35FA3C2CD63B280 /* PairingSheet.swift */,
+				BBB68DE356BAC41681776D02 /* PairingViews.swift */,
+				8C6704773A8691B9CDE2CCA6 /* QRPairing.swift */,
 				252D0BD0194B2B707AEDFE64 /* RelayClient.swift */,
-				A8D009735BA12F6535F34463 /* RoomSheet.swift */,
+				69272A2B76ACFB0AC3C84B3C /* RoomPickerView.swift */,
+				6A2E28742F115954DAB5CA76 /* RootView.swift */,
+				725CB393B4547C985E66C988 /* ScanView.swift */,
 				1FB473E29282B15BF7AC9587 /* SeeThroughApp.swift */,
+				BA5F5FA1CA41E2704C81F403 /* SeeThroughView.swift */,
+				22302FAB97C31B2324DB452B /* SettingsView.swift */,
+				31B4FB982C6D351EBDA7F6CD /* Theme.swift */,
 				D0543F7970E1CB561A1539DE /* WallExtractor.swift */,
 				FFC603A3EBE175DDBDDB44C4 /* Wire.swift */,
+				BC8AA98F0FF08D9077C34107 /* Fonts */,
 			);
 			path = SeeThrough;
 			sourceTree = "<group>";
@@ -81,6 +116,18 @@
 			);
 			sourceTree = "<group>";
 		};
+		BC8AA98F0FF08D9077C34107 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				C6FE7FDE8BE1A4EF2157E98B /* Doto.ttf */,
+				8EC197D22D32C3E27832FE85 /* OFL-Doto.txt */,
+				0AFB1E234697F412A47BFB90 /* OFL-SpaceMono.txt */,
+				9F066E7F967E4A7340DA5A76 /* SpaceMono-Bold.ttf */,
+				E5E3FCBAD1D893CD86A85A1D /* SpaceMono-Regular.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -89,6 +136,7 @@
 			buildConfigurationList = 9533916C94BF60647331BA02 /* Build configuration list for PBXNativeTarget "SeeThrough" */;
 			buildPhases = (
 				061C774B046D7F32487778F0 /* Sources */,
+				353C5C5108A011AB403E3C84 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -135,6 +183,21 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		353C5C5108A011AB403E3C84 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				854FF87A1454391898E567CE /* Doto.ttf in Resources */,
+				8591589FB84591BBD6B686BD /* OFL-Doto.txt in Resources */,
+				61146A0EBC6C052826B146E9 /* OFL-SpaceMono.txt in Resources */,
+				96EB3AEE8A8C4895B0F99EB2 /* SpaceMono-Bold.ttf in Resources */,
+				8AB2A2BA1E952E60C1185DCB /* SpaceMono-Regular.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		061C774B046D7F32487778F0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -142,16 +205,24 @@
 			files = (
 				C397696CCEBE494804B935EB /* ARCapture.swift in Sources */,
 				EAB20143BD27B7A0A3945B02 /* ARPreview.swift in Sources */,
-				810A5878BE87E2DA89045638 /* ContentView.swift in Sources */,
+				8606D325C4A794F4504C1CB1 /* AppModel.swift in Sources */,
 				10DF1C653BA6C8FC1874B19D /* FloorGeometry.swift in Sources */,
 				41918C85674A82BFA9624DBB /* FloorPlan.swift in Sources */,
 				4BB7C8C778731DCFDF587004 /* FloorPlan3D.swift in Sources */,
+				20FE62D866402513DF99A56C /* HomeView.swift in Sources */,
+				7B2330B322F5107D3EE7A645 /* Indicators.swift in Sources */,
 				6D4E645D65D0D68F786F1EE9 /* LocalCloud.swift in Sources */,
 				83D7725535250E63C3843F38 /* MeshProcessor.swift in Sources */,
-				3AD3D627AAA468D8D97F903A /* PairingSheet.swift in Sources */,
+				A7912FB49AE9467883B53919 /* PairingViews.swift in Sources */,
+				2F145AF5A822E5F575D080D0 /* QRPairing.swift in Sources */,
 				911A7DE7CABFF639B2F68AD8 /* RelayClient.swift in Sources */,
-				95D14F9EFFFDCB1700312A6C /* RoomSheet.swift in Sources */,
+				7F0A1BB921D1D6909D656FEA /* RoomPickerView.swift in Sources */,
+				51A0BD1E92255A556F390004 /* RootView.swift in Sources */,
+				9746667391F574EB2FE8B1B3 /* ScanView.swift in Sources */,
 				71809BA327770D7C45871DFC /* SeeThroughApp.swift in Sources */,
+				7DF1F189D71D36C3E6AEB8F9 /* SeeThroughView.swift in Sources */,
+				C8977C71469C90407061C9E6 /* SettingsView.swift in Sources */,
+				7A75CB35A19390B5C2CCADA8 /* Theme.swift in Sources */,
 				382C00E4A7B6DFF15C1E0354 /* WallExtractor.swift in Sources */,
 				BC25F29C178A4A58AC36CC40 /* Wire.swift in Sources */,
 			);

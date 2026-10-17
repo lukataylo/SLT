@@ -67,6 +67,12 @@ final class RelayClient: ObservableObject {
     var onReset: ((_ restartTracking: Bool) -> Void)?
     /// ARKit collaboration data from another phone, to feed our session.
     var onCollaboration: ((Data) -> Void)?
+    /// QR pairing replies: the shown code's pose on the map; the code being
+    /// unknown or expired; and (to the showing phone) that someone paired.
+    var onPairingPose: ((_ codeOnMap: simd_float4x4, _ by: String) -> Void)?
+    var onPairingUnknown: (() -> Void)?
+    var onPairingDone: ((_ by: String) -> Void)?
+    private(set) var server: URL?
 
     /// Other phones' live video, by peer id, for the x-ray view.
     private(set) var feeds: [String: RemoteFeed] = [:]
@@ -96,6 +102,7 @@ final class RelayClient: ObservableObject {
     }
 
     func connect(server: URL, name: String) {
+        self.server = server
         target = (server, name)
         open()
     }
@@ -146,6 +153,19 @@ final class RelayClient: ObservableObject {
     /// Our alignment as worked out from a paired phone's map-origin anchor.
     func pair(_ alignment: FloorTransform) {
         sendText(["t": "pair", "alignment": ["yaw": Double(alignment.yaw), "t": [Double(alignment.tx), Double(alignment.ty), Double(alignment.tz)]]])
+    }
+
+    func showPairing(code: String, codeOnMap: simd_float4x4) {
+        sendText(["t": "pairing", "action": "show", "code": code, "m": QRPairing.columnMajor(codeOnMap)])
+    }
+
+    func hidePairing(code: String) { sendText(["t": "pairing", "action": "hide", "code": code]) }
+    func claimPairing(code: String) { sendText(["t": "pairing", "action": "claim", "code": code]) }
+
+    func renameRoom(_ id: String, name: String, planRoomId: String?) {
+        var message: [String: Any] = ["t": "room", "action": "rename", "roomId": id, "name": name]
+        message["planRoomId"] = planRoomId ?? NSNull()
+        sendText(message)
     }
 
     func switchRoom(_ id: String) { sendText(["t": "room", "action": "switch", "roomId": id]) }
@@ -226,6 +246,14 @@ final class RelayClient: ObservableObject {
                 peerMarks[id] = nil
                 feeds[id] = nil
                 feedsVersion += 1
+            }
+        case "pairing":
+            switch msg["action"] as? String {
+            case "pose":
+                if let m = (msg["m"] as? [Double]).flatMap(QRPairing.matrix(columnMajor:)) { onPairingPose?(m, msg["by"] as? String ?? "") }
+            case "unknown": onPairingUnknown?()
+            case "done": onPairingDone?(msg["by"] as? String ?? "")
+            default: break
             }
         case "collab":
             if let b64 = msg["data"] as? String, let data = Data(base64Encoded: b64) { onCollaboration?(data) }
@@ -343,3 +371,48 @@ final class RelayClient: ObservableObject {
         task.send(.string(text)) { _ in }
     }
 }
+
+#if DEBUG
+extension RelayClient {
+    /// Sample state for rendering screens in the simulator (no ARKit there).
+    func loadDemo(located: Bool, withMap: Bool) {
+        connected = true
+        server = URL(string: Settings.defaultServer)
+        guard withMap else { return }
+        peers = 2
+        originFoundedBy = "Ana"
+        func w(_ a: (Float, Float), _ b: (Float, Float)) -> WallSegment { WallSegment(a: SIMD2(a.0, a.1), b: SIMD2(b.0, b.1)) }
+        rooms = [
+            MapRoom(id: "r1", name: "Living", origin: .zero, planRoomId: "pr1",
+                    walls: [w((0, 0), (5, 0)), w((5, 0), (5, 4.5)), w((5, 4.5), (0, 4.5)), w((0, 4.5), (0, 0))], seen: [3, 2, 3, 1],
+                    openings: [Opening(kind: "door", a: SIMD2(3, 4.5), b: SIMD2(4, 4.5), y0: 0, y1: 2.05),
+                               Opening(kind: "window", a: SIMD2(0, 1.2), b: SIMD2(0, 2.8), y0: 0.9, y1: 2.1)],
+                    floor: [SIMD2(0, 0), SIMD2(5, 0), SIMD2(5, 4.5), SIMD2(0, 4.5)]),
+            MapRoom(id: "r2", name: "Kitchen", origin: SIMD2(6, 1), planRoomId: nil,
+                    walls: [w((5, 0), (9, 0)), w((9, 0), (9, 3)), w((5, 3), (9, 3))], seen: [1, 1, 2],
+                    openings: [], floor: []),
+        ]
+        plan = PlanInfo(name: "Flat", rooms: [.init(id: "pr1", name: "Living", polygon: [SIMD2(0, 0), SIMD2(5, 0), SIMD2(5, 4.5), SIMD2(0, 4.5)]),
+                                               .init(id: "pr2", name: "Bedroom", polygon: [SIMD2(0, 4.5), SIMD2(5, 4.5), SIMD2(5, 7), SIMD2(0, 7)])],
+                        placement: FloorTransform())
+        roomId = located ? "r1" : nil
+        alignment = Alignment(aligned: located, method: located ? "walls" : nil, match: 0.92, ambiguous: false, needsFloor: false,
+                              transform: FloorTransform(ty: 1.4))
+        peerMarks = ["p2": Mark(x: 7, z: 1.5, yaw: 1.2), "p3": Mark(x: 2, z: 6, yaw: -0.4)]
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 480, height: 360))
+        for (id, name, hue, x) in [("p2", "Ben", 0.08, Float(7)), ("p3", "Cy", 0.55, Float(2))] {
+            let image = renderer.image { ctx in
+                UIColor(hue: hue, saturation: 0.35, brightness: 0.75, alpha: 1).setFill()
+                ctx.fill(CGRect(x: 0, y: 0, width: 480, height: 360))
+                UIColor(white: 0.25, alpha: 1).setFill()
+                ctx.fill(CGRect(x: 0, y: 250, width: 480, height: 110))
+                UIColor(white: 0.95, alpha: 1).setFill()
+                ctx.fill(CGRect(x: 300, y: 70, width: 110, height: 150))
+            }
+            feeds[id] = RemoteFeed(name: name, position: SIMD3(x, 1.4, 1.5), orientation: simd_quatf(angle: 0.6, axis: SIMD3(0, 1, 0)),
+                                   vfov: 50, aspect: 4 / 3, image: image, receivedAt: .distantFuture)
+        }
+        feedsVersion += 1
+    }
+}
+#endif

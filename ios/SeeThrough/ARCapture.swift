@@ -29,6 +29,22 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     var onPeerMapOrigin: ((FloorTransform) -> Void)?
     /// How many other phones ARKit has merged with.
     @Published private(set) var participants = 0
+
+    /// What to send: video only while seeing through, colour points only
+    /// while scanning (set by the app's mode and settings).
+    var sendFrames = false
+    var sendCloud = false
+    /// Latest camera pose in our frame, for placing a displayed pairing code.
+    private(set) var cameraTransform = matrix_identity_float4x4
+
+    /// While pairing by QR: read codes from frames, then track the matching
+    /// image so ARKit measures its pose.
+    var detectQR = false
+    var onQRPayload: ((PairingPayload) -> Void)?
+    var onCodePose: ((simd_float4x4) -> Void)?
+    private var lastQRCheck: TimeInterval = 0
+    private var detecting = false
+    private let visionQueue = DispatchQueue(label: "slt.qr", qos: .userInitiated)
     private var mapAnchor: ARAnchor?
     private static let mapAnchorName = "slt-map"
 
@@ -94,8 +110,21 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        guard case .normal = frame.camera.trackingState else { return }
+        cameraTransform = frame.camera.transform
         let now = frame.timestamp
+        if detectQR && !detecting && now - lastQRCheck > 0.3 {
+            lastQRCheck = now
+            detecting = true
+            let buffer = frame.capturedImage
+            visionQueue.async { [weak self] in
+                let payload = QRPairing.detect(in: buffer)
+                DispatchQueue.main.async {
+                    self?.detecting = false
+                    if let payload, self?.detectQR == true { self?.onQRPayload?(payload) }
+                }
+            }
+        }
+        guard case .normal = frame.camera.trackingState else { return }
         let pose = Self.pose(of: frame)
 
         if now - lastPose >= Self.poseInterval {
@@ -125,7 +154,7 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
                 guard !points.isEmpty else { return }
                 self.cloud.append(points)
                 self.cloudVersion += 1
-                self.onCloud?(points)
+                if self.sendCloud { self.onCloud?(points) }
             }
         }
         // Encode off the main thread, at most one frame at a time, so ARKit
@@ -139,7 +168,7 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
                 let jpeg = self.jpeg(image)
                 DispatchQueue.main.async {
                     self.encoding = false
-                    if let jpeg { self.onFrame?(pose, jpeg) }
+                    if let jpeg, self.sendFrames { self.onFrame?(pose, jpeg) }
                 }
             }
         }
@@ -171,10 +200,24 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         mapAnchor = anchor
     }
 
+    /// Start measuring a pairing code we've read: ARKit tracks it as an image.
+    func track(_ reference: ARReferenceImage) {
+        configuration.detectionImages = [reference]
+        configuration.maximumNumberOfTrackedImages = 1
+        session.run(configuration)
+    }
+
+    func stopTrackingCodes() {
+        guard !(configuration.detectionImages ?? []).isEmpty else { return }
+        configuration.detectionImages = []
+        session.run(configuration)
+    }
+
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) { handlePeerAnchors(anchors) }
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) { handlePeerAnchors(anchors) }
 
     private func handlePeerAnchors(_ anchors: [ARAnchor]) {
+        for case let image as ARImageAnchor in anchors where image.isTracked { onCodePose?(image.transform) }
         participants = session.currentFrame?.anchors.filter { $0 is ARParticipantAnchor }.count ?? participants
         for anchor in anchors where anchor.name == Self.mapAnchorName && anchor.sessionIdentifier != session.identifier {
             // The anchor is the map origin expressed in our frame, so its
@@ -214,3 +257,28 @@ final class ARCapture: NSObject, ObservableObject, ARSessionDelegate {
         return ciContext.jpegRepresentation(of: scaled, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: options)
     }
 }
+
+#if DEBUG
+extension ARCapture {
+    /// Sample scan for rendering screens in the simulator.
+    func loadDemo(floor: Bool) {
+        tracking = "TRACKING"
+        hasLiDAR = true
+        guard floor else { return }
+        scan = LocalScan(walls: [WallSegment(a: SIMD2(0, 0), b: SIMD2(5, 0)), WallSegment(a: SIMD2(5, 0), b: SIMD2(5, 4.5))],
+                         openings: [], floor: [SIMD2(0, 0), SIMD2(5, 0), SIMD2(5, 4.5), SIMD2(0, 4.5)], floorY: -1.4)
+        localMark = Mark(x: 2.5, z: 2.5, yaw: 0.3)
+        var batch = MeshProcessor.ColouredPoints()
+        for i in 0..<6000 {
+            let wall = i % 3
+            let t = Float.random(in: 0...1), y = Float.random(in: -1.4...1.2)
+            let (x, z): (Float, Float) = wall == 0 ? (t * 5, 0) : wall == 1 ? (5, t * 4.5) : (Float.random(in: 0...5), Float.random(in: 0...4.5))
+            batch.points += [x, wall == 2 ? -1.4 : y, z]
+            batch.colors += wall == 2 ? [150, 105, 70] : (wall == 0 ? [214, 206, 190] : [120, 150, 170])
+            batch.normals += [0, 127, 0]
+        }
+        cloud.append(batch)
+        cloudVersion += 1
+    }
+}
+#endif

@@ -80,9 +80,9 @@ struct FloorPlanView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(title).font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
+                Text(title).label(8).foregroundStyle(Theme.muted).lineLimit(1)
                 Spacer()
-                Text("\(walls.count) WALLS · \(openings.filter { $0.kind == "door" }.count) DOORS · \(openings.filter { $0.kind == "window" }.count) WIN").font(.system(size: 9, design: .monospaced)).tracking(1.3).foregroundStyle(.gray)
+                Text("\(walls.count) walls · \(openings.filter { $0.kind == "door" }.count) doors · \(openings.filter { $0.kind == "window" }.count) win").label(8).foregroundStyle(Theme.muted)
             }
             ZStack {
                 FloorPlanScene(walls: walls, seen: seen, openings: openings, floor: floor, target: target, me: me, peers: peers, origin: origin,

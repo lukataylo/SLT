@@ -11,6 +11,7 @@ const MAX_OPENINGS_PER_PEER = 100;
 const MAX_FLOOR_POINTS = 400;
 const MAX_CLOUD_PER_MESSAGE = 3 * 8000;
 const ADMIN_FRAME_INTERVAL_MS = 500;
+const PAIRING_CODE_TTL_MS = 3000;
 
 // How sure registration must be before a phone's poses are trusted in the map.
 const MIN_INLIER_FRACTION = 0.6;
@@ -38,6 +39,8 @@ export class Room {
     this.map = map;
     this.peers = new Map();
     this.admins = new Map();
+    // QR pairing codes on display: code -> { peerId, name, m, at }.
+    this.pairingCodes = new Map();
     this.nextId = 1;
     this.recorder = recorder;
     this.now = now;
@@ -70,6 +73,7 @@ export class Room {
     if (this.admins.delete(id)) return;
     const peer = this.peers.get(id);
     if (!peer) return;
+    for (const [code, shown] of this.pairingCodes) if (shown.peerId === id) this.pairingCodes.delete(code);
     this.peers.delete(id);
     this.broadcastJson({ t: 'leave', id }, id);
     if (peer.alignment) {
@@ -123,6 +127,31 @@ export class Room {
       for (const p of this.peers.values()) if (p.local && p.id !== id && p.socket.readyState === OPEN) p.socket.send(text);
     } else if (msg?.t === 'pair' && peer.local) {
       this.pairPeer(peer, msg.alignment);
+    } else if (msg?.t === 'pairing' && peer.local) {
+      this.pairingMessage(peer, msg);
+    }
+  }
+
+  // QR pairing. The phone showing a code streams where that code is on the
+  // map (a 4x4 matrix, column-major, from its own tracking + alignment). The
+  // phone that scans it measures the code in its own frame and claims it: the
+  // two poses of one physical code give its alignment directly.
+  pairingMessage(peer, msg) {
+    const code = typeof msg.code === 'string' ? msg.code.slice(0, 64) : null;
+    if (!code) return;
+    if (msg.action === 'show') {
+      const m = msg.m;
+      if (!peer.alignment || !Array.isArray(m) || m.length !== 16 || !m.every(Number.isFinite)) return;
+      this.pairingCodes.set(code, { peerId: peer.id, name: peer.name, m, at: this.now() });
+    } else if (msg.action === 'hide') {
+      if (this.pairingCodes.get(code)?.peerId === peer.id) this.pairingCodes.delete(code);
+    } else if (msg.action === 'claim') {
+      const shown = this.pairingCodes.get(code);
+      if (!shown || this.now() - shown.at > PAIRING_CODE_TTL_MS || shown.peerId === peer.id) {
+        return this.sendJson(peer, { t: 'pairing', action: 'unknown', code });
+      }
+      peer.pairingWith = shown.peerId;
+      this.sendJson(peer, { t: 'pairing', action: 'pose', code, m: shown.m, by: shown.name });
     }
   }
 
@@ -133,6 +162,9 @@ export class Room {
     if (!valid || !this.map.origin) return;
     peer.alignment = { yaw: a.yaw, t: [...a.t] };
     peer.pendingJump = null;
+    const shower = peer.pairingWith && this.peers.get(peer.pairingWith);
+    if (shower) this.sendJson(shower, { t: 'pairing', action: 'done', by: peer.name });
+    peer.pairingWith = null;
     if (!peer.roomId || !this.map.room(peer.roomId)) peer.roomId = this.map.roomAt(transformPoint2(0, 0, peer.alignment))?.id ?? null;
     this.sendAlign(peer, { method: 'paired', correction: 'locked' });
     this.broadcastMap();
@@ -167,6 +199,12 @@ export class Room {
         at: new Date(this.now()).toISOString(),
       });
       this.enterRoom(peer, room.id);
+    } else if (msg.action === 'rename' && this.map.room(msg.roomId)) {
+      const room = this.map.room(msg.roomId);
+      if (typeof msg.name === 'string' && msg.name.trim()) room.name = msg.name.trim().slice(0, 40);
+      if (msg.planRoomId !== undefined) room.planRoomId = this.map.plan?.rooms?.some((r) => r.id === msg.planRoomId) ? msg.planRoomId : null;
+      this.map.changed();
+      this.broadcastMap();
     } else if (msg.action === 'switch' && this.map.room(msg.roomId)) {
       this.map.commit(peer.id);
       this.enterRoom(peer, msg.roomId);

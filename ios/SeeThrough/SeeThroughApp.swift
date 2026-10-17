@@ -4,7 +4,7 @@ import SwiftUI
 struct SeeThroughApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .preferredColorScheme(.dark)
         }
     }

@@ -388,3 +388,40 @@ test('an uploaded plan is placed onto the scan automatically', () => {
   const [x, z] = [Math.cos(placement.yaw) * 2 + Math.sin(placement.yaw) * 8 + placement.t[0], -Math.sin(placement.yaw) * 2 + Math.cos(placement.yaw) * 8 + placement.t[2]];
   assert.ok(Math.hypot(x, z) < 0.1, `plan corner maps to ${x}, ${z}`);
 });
+
+test('QR pairing: a shown code can be claimed once fresh, and the shower hears when pairing is done', () => {
+  let now = 1000;
+  const room = new Room({ now: () => now });
+  const a = new FakeSocket();
+  const idA = room.join(a, { name: 'Ana', frame: 'local' });
+  const b = new FakeSocket();
+  const idB = room.join(b, { name: 'Ben', frame: 'local' });
+  const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 1, 3, 1];
+
+  room.handleText(idA, JSON.stringify({ t: 'pairing', action: 'show', code: 'abc', m }));
+  room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'claim', code: 'abc' }));
+  assert.equal(last(b, 'pairing').action, 'unknown', 'an unplaced phone cannot show a code');
+
+  room.handleText(idA, planes(ROOM));
+  room.handleText(idA, JSON.stringify({ t: 'pairing', action: 'show', code: 'abc', m }));
+  room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'claim', code: 'abc' }));
+  assert.deepEqual(last(b, 'pairing'), { t: 'pairing', action: 'pose', code: 'abc', m, by: 'Ana' });
+
+  room.handleText(idB, JSON.stringify({ t: 'pair', alignment: { yaw: 0.2, t: [1, 1.3, 2] } }));
+  assert.deepEqual(last(a, 'pairing'), { t: 'pairing', action: 'done', by: 'Ben' });
+
+  now += 5000;
+  room.handleText(idB, JSON.stringify({ t: 'pairing', action: 'claim', code: 'abc' }));
+  assert.equal(last(b, 'pairing').action, 'unknown', 'stale codes expire');
+});
+
+test('rooms can be renamed and linked to a plan room', () => {
+  const room = new Room();
+  room.map.setPlan({ id: 'p', name: 'Plan', rooms: [{ id: 'pr1', name: 'Lounge', polygon: [[0, 0], [1, 0], [1, 1]] }], placement: null });
+  const id = room.join(new FakeSocket(), { name: 'A', frame: 'local' });
+  room.handleText(id, planes(ROOM));
+  room.handleText(id, JSON.stringify({ t: 'room', action: 'rename', roomId: 'r1', name: 'Living room', planRoomId: 'pr1' }));
+  assert.deepEqual([room.map.rooms[0].name, room.map.rooms[0].planRoomId], ['Living room', 'pr1']);
+  room.handleText(id, JSON.stringify({ t: 'room', action: 'rename', roomId: 'r1', planRoomId: 'nope' }));
+  assert.equal(room.map.rooms[0].planRoomId, null);
+});

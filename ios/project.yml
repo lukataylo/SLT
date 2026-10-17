@@ -23,6 +23,7 @@ targets:
         CFBundleDisplayName: See Through
         NSCameraUsageDescription: The camera streams what you see and scans walls with LiDAR so other people can see through them.
         UIRequiredDeviceCapabilities: [arkit]
+        UIAppFonts: [Doto.ttf, SpaceMono-Regular.ttf, SpaceMono-Bold.ttf]
         UILaunchScreen: { UIColorName: "" }
         UIStatusBarStyle: UIStatusBarStyleLightContent
         UIUserInterfaceStyle: Dark

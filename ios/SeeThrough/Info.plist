@@ -22,6 +22,12 @@
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera streams what you see and scans walls with LiDAR so other people can see through them.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Doto.ttf</string>
+		<string>SpaceMono-Regular.ttf</string>
+		<string>SpaceMono-Bold.ttf</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
